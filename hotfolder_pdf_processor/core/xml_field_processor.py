@@ -1,5 +1,5 @@
 """
-XML-Feldverarbeitung für SSDS-Format mit erweiterter Funktionsunterstützung
+XML-Feldverarbeitung mit erweiterter Funktionsunterstützung
 """
 import os
 import re
@@ -20,12 +20,13 @@ class FieldMapping:
     
     def __init__(self, field_name: str, source_type: str = "expression", 
                  expression: str = "", zone: Optional[Tuple[int, int, int, int]] = None,
-                 page_num: int = 1):
+                 page_num: int = 1, zones: Optional[List[Dict]] = None):
         self.field_name = field_name
         self.source_type = source_type  # "expression", "ocr_zone"
         self.expression = expression  # Funktionsausdruck
-        self.zone = zone  # (x, y, width, height) für OCR-Zone
+        self.zone = zone  # (x, y, width, height) für OCR-Zone (legacy)
         self.page_num = page_num
+        self.zones = zones or []  # Liste von OCR-Zonen für Multi-Zone Support
     
     def to_dict(self) -> dict:
         """Konvertiert zu Dictionary für Speicherung"""
@@ -34,7 +35,8 @@ class FieldMapping:
             "source_type": self.source_type,
             "expression": self.expression,
             "zone": self.zone,
-            "page_num": self.page_num
+            "page_num": self.page_num,
+            "zones": self.zones
         }
     
     @classmethod
@@ -66,15 +68,26 @@ class FieldMapping:
                 source_type="expression",
                 expression=expression,
                 zone=data.get("zone"),
-                page_num=data.get("page_num", 1)
+                page_num=data.get("page_num", 1),
+                zones=data.get("zones", [])
             )
+        
+        # Legacy-Support: Wenn zone definiert ist aber zones nicht
+        zones = data.get("zones", [])
+        if data.get("zone") and not zones:
+            zones = [{
+                'zone': data["zone"],
+                'page_num': data.get("page_num", 1),
+                'name': 'Zone_1'
+            }]
         
         return cls(
             field_name=data["field_name"],
             source_type=data.get("source_type", "expression"),
             expression=data.get("expression", ""),
             zone=data.get("zone"),
-            page_num=data.get("page_num", 1)
+            page_num=data.get("page_num", 1),
+            zones=zones
         )
 
 
@@ -166,7 +179,8 @@ class XMLFieldProcessor:
         context.update(VariableExtractor.get_file_variables(pdf_path))
         
         # XML-Variablen
-        context.update(VariableExtractor.get_xml_variables(xml_path))
+        if xml_path and os.path.exists(xml_path):
+            context.update(VariableExtractor.get_xml_variables(xml_path))
         
         # OCR-Text (lazy loading)
         if any(m.expression and 'OCR' in m.expression for m in mappings):
@@ -178,7 +192,22 @@ class XMLFieldProcessor:
         
         # OCR-Zonen (werden bei Bedarf geladen)
         for mapping in mappings:
-            if mapping.source_type == "ocr_zone" and mapping.zone:
+            # Multi-Zone Support
+            if mapping.zones:
+                for i, zone_info in enumerate(mapping.zones):
+                    zone_key = f"{zone_info['page_num']}_{zone_info['zone']}"
+                    if zone_key not in self._zone_cache:
+                        zone_text = self.ocr_processor.extract_text_from_zone(
+                            pdf_path, zone_info['page_num'], zone_info['zone']
+                        )
+                        self._zone_cache[zone_key] = zone_text
+                    
+                    # Füge Zone als Variable hinzu
+                    context[f'OCR_Zone_{i+1}'] = self._zone_cache[zone_key]
+                    context[f'ZONE_{i+1}'] = self._zone_cache[zone_key]
+            
+            # Legacy Support für einzelne Zone
+            elif mapping.source_type == "ocr_zone" and mapping.zone:
                 zone_key = f"{mapping.page_num}_{mapping.zone}"
                 if zone_key not in self._zone_cache:
                     zone_text = self.ocr_processor.extract_text_from_zone(
@@ -196,19 +225,34 @@ class XMLFieldProcessor:
                          context: Dict[str, Any]) -> Optional[str]:
         """Evaluiert ein Mapping und gibt den Wert zurück"""
         
-        if mapping.source_type == "ocr_zone" and mapping.zone:
-            # Spezialbehandlung für OCR-Zonen
-            zone_name = f"Zone_{mapping.field_name}"
-            zone_var = f"<OCR_{zone_name}>"
+        if mapping.source_type == "ocr_zone":
+            # Multi-Zone Support
+            if mapping.zones:
+                # Wenn eine Expression definiert ist, verwende sie
+                if mapping.expression:
+                    return self.function_parser.parse_and_evaluate(mapping.expression, context)
+                else:
+                    # Kombiniere alle Zonen-Texte
+                    zone_texts = []
+                    for i in range(len(mapping.zones)):
+                        zone_text = context.get(f'ZONE_{i+1}', "")
+                        if zone_text:
+                            zone_texts.append(zone_text)
+                    return " ".join(zone_texts)
             
-            # Wenn eine Expression definiert ist, verwende sie
-            if mapping.expression:
-                # Ersetze Platzhalter in der Expression
-                expression = mapping.expression.replace("<ZONE>", zone_var)
-                return self.function_parser.parse_and_evaluate(expression, context)
-            else:
-                # Nur Zone-Text zurückgeben
-                return context.get(f'OCR_{zone_name}', "")
+            # Legacy Support für einzelne Zone
+            elif mapping.zone:
+                zone_name = f"Zone_{mapping.field_name}"
+                zone_var = f"<OCR_{zone_name}>"
+                
+                # Wenn eine Expression definiert ist, verwende sie
+                if mapping.expression:
+                    # Ersetze Platzhalter in der Expression
+                    expression = mapping.expression.replace("<ZONE>", zone_var)
+                    return self.function_parser.parse_and_evaluate(expression, context)
+                else:
+                    # Nur Zone-Text zurückgeben
+                    return context.get(f'OCR_{zone_name}', "")
         
         elif mapping.expression:
             # Normale Expression-Verarbeitung
@@ -250,6 +294,11 @@ class XMLFieldProcessor:
             print(f"Fehler beim Lesen der XML-Felder: {e}")
             return []
     
+    def clear_ocr_cache(self):
+        """Leert den OCR-Cache"""
+        self._ocr_cache.clear()
+        self._zone_cache.clear()
+    
     def get_available_variables(self, xml_path: str = None, 
                                pdf_path: str = None) -> Dict[str, List[str]]:
         """Gibt alle verfügbaren Variablen gruppiert zurück"""
@@ -273,7 +322,12 @@ class XMLFieldProcessor:
         # XML-Variablen
         if xml_path and os.path.exists(xml_path):
             xml_vars = VariableExtractor.get_xml_variables(xml_path)
-            variables["XML"] = [k.replace("XML_", "") for k in xml_vars.keys()]
+            # Zeige sowohl mit als auch ohne XML_ Prefix
+            variables["XML"] = []
+            for k in xml_vars.keys():
+                if k.startswith("XML_"):
+                    variables["XML"].append(k[4:])  # Ohne Prefix
+                    variables["XML"].append(k)      # Mit Prefix
         
         return variables
     
@@ -309,7 +363,7 @@ class XMLFieldProcessor:
                  "desc": "Zählt einen Wert hoch"},
             ],
             "Bedingungen": [
-                {"name": "IF", "syntax": 'IF("<VAR>",<OP>,"<VALUE>","<TRUE>","<FALSE>",<CASE>)', 
+                {"name": "IF", "syntax": 'IF("<VAR>","<OP>","<VALUE>","<TRUE>","<FALSE>")', 
                  "desc": "Bedingte Auswertung"},
             ],
             "RegEx": [

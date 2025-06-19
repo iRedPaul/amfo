@@ -81,13 +81,13 @@ class XMLFieldDialog:
         self.info_frame = ttk.LabelFrame(self.main_frame, text="Hilfe", padding="10")
         self.info_text = tk.Text(self.info_frame, height=8, wrap=tk.WORD)
         self.info_text.insert("1.0", 
-            "Verwenden Sie Funktionen und Variablen um XML-Felder zu befüllen:\n\n"
-            "Variablen: <VariablenName> z.B. <FileName>, <OCR_FullText>\n"
-            "Funktionen: FUNKTIONSNAME(Parameter) z.B. FORMATDATE(\"dd.mm.yyyy\")\n"
-            "Bedingungen: IF(Variable, Operator, Wert, WennWahr, WennFalsch)\n"
-            "RegEx: REGEXP.MATCH(Variable, Pattern, Index)\n"
-            "String: LEFT(Variable, Länge), TRIM(Variable), TOUPPER(Variable)\n"
-            "Verkettung: Kombinieren Sie Text und Funktionen mit +")
+            "XML-Felder mit dynamischen Werten befüllen:\n\n"
+            "• Klicken Sie auf 'Neues Feld' um ein Mapping hinzuzufügen\n"
+            "• Verwenden Sie Variablen in spitzen Klammern: <VariablenName>\n"
+            "• Nutzen Sie Funktionen für erweiterte Verarbeitung\n"
+            "• OCR-Zonen können grafisch definiert werden\n"
+            "• Testen Sie Ihre Ausdrücke mit der Test-Funktion\n\n"
+            "Doppelklick zum Bearbeiten eines Eintrags")
         self.info_text.config(state=tk.DISABLED)
         
         # Buttons
@@ -136,7 +136,10 @@ class XMLFieldDialog:
     
     def _add_to_tree(self, mapping: FieldMapping):
         """Fügt ein Mapping zur Baumanzeige hinzu"""
-        type_text = "OCR-Zone" if mapping.source_type == "ocr_zone" else "Ausdruck"
+        if mapping.source_type == "ocr_zone" and mapping.zone:
+            type_text = f"OCR-Zone ({mapping.zone[2]}x{mapping.zone[3]})"
+        else:
+            type_text = "Ausdruck"
         
         expression_text = mapping.expression[:60] + "..." if len(mapping.expression) > 60 else mapping.expression
         
@@ -188,7 +191,12 @@ class XMLFieldDialog:
                 
                 # Aktualisiere Tree
                 self.tree.delete(item)
-                type_text = "OCR-Zone" if new_mapping.source_type == "ocr_zone" else "Ausdruck"
+                
+                if new_mapping.source_type == "ocr_zone" and new_mapping.zone:
+                    type_text = f"OCR-Zone ({new_mapping.zone[2]}x{new_mapping.zone[3]})"
+                else:
+                    type_text = "Ausdruck"
+                    
                 expression_text = new_mapping.expression[:60] + "..." if len(new_mapping.expression) > 60 else new_mapping.expression
                 
                 self.tree.insert("", index, values=(
@@ -244,7 +252,7 @@ class XMLFieldDialog:
 
 
 class FieldMappingEditDialog:
-    """Dialog zum Bearbeiten eines einzelnen Field-Mappings mit Funktionsunterstützung"""
+    """Dialog zum Bearbeiten eines einzelnen Field-Mappings"""
     
     def __init__(self, parent, mapping: Optional[FieldMapping] = None, 
                  xml_processor: XMLFieldProcessor = None):
@@ -252,6 +260,8 @@ class FieldMappingEditDialog:
         self.mapping = mapping
         self.result = None
         self.xml_processor = xml_processor or XMLFieldProcessor()
+        self.ocr_zones = []  # Liste der definierten OCR-Zonen
+        self.current_zone_index = 0
         
         # Dialog erstellen
         self.dialog = tk.Toplevel(parent)
@@ -267,30 +277,25 @@ class FieldMappingEditDialog:
         self.field_name_var = tk.StringVar(value=mapping.field_name if mapping else "")
         self.source_type_var = tk.StringVar(value=mapping.source_type if mapping else "expression")
         self.expression_var = tk.StringVar(value=mapping.expression if mapping else "")
-        self.page_num_var = tk.IntVar(value=mapping.page_num if mapping else 1)
         
-        # Zone-Variablen
+        # Lade existierende Zonen wenn vorhanden
         if mapping and mapping.zone:
-            self.zone_x_var = tk.IntVar(value=mapping.zone[0])
-            self.zone_y_var = tk.IntVar(value=mapping.zone[1])
-            self.zone_w_var = tk.IntVar(value=mapping.zone[2])
-            self.zone_h_var = tk.IntVar(value=mapping.zone[3])
-        else:
-            self.zone_x_var = tk.IntVar(value=0)
-            self.zone_y_var = tk.IntVar(value=0)
-            self.zone_w_var = tk.IntVar(value=100)
-            self.zone_h_var = tk.IntVar(value=50)
+            self.ocr_zones.append({
+                'zone': mapping.zone,
+                'page_num': mapping.page_num,
+                'name': 'Zone_1'
+            })
         
         self._create_widgets()
         self._layout_widgets()
-        self._update_visibility()
+        self._update_help("")
         
         # Fokus
         self.field_name_entry.focus()
     
     def _create_widgets(self):
         """Erstellt alle Widgets"""
-        # Hauptframe mit Notebook
+        # Hauptframe
         self.main_frame = ttk.Frame(self.dialog, padding="10")
         
         # Feldname
@@ -305,90 +310,61 @@ class FieldMappingEditDialog:
         self.expr_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.expr_frame, text="Ausdruck erstellen")
         
-        # Expression-Eingabe
-        self.expr_label = ttk.Label(self.expr_frame, text="Ausdruck:")
-        self.expr_text = tk.Text(self.expr_frame, height=4, width=70)
+        # Expression-Eingabe mit größerem Bereich
+        self.expr_input_frame = ttk.LabelFrame(self.expr_frame, text="Ausdruck", padding="10")
+        self.expr_text = tk.Text(self.expr_input_frame, height=6, width=70)
         if self.mapping and self.mapping.expression:
             self.expr_text.insert("1.0", self.mapping.expression)
         
-        # Funktionen und Variablen
-        self.builder_frame = ttk.Frame(self.expr_frame)
+        # Kombinierter Tree für Variablen und Funktionen
+        self.tree_frame = ttk.LabelFrame(self.expr_frame, text="Verfügbare Variablen und Funktionen", padding="5")
         
-        # Variablen
-        self.var_frame = ttk.LabelFrame(self.builder_frame, text="Variablen", padding="5")
-        self.var_tree = ttk.Treeview(self.var_frame, height=10)
-        self.var_tree.heading("#0", text="Verfügbare Variablen")
+        # Paned Window für Tree und Hilfe
+        self.paned = ttk.PanedWindow(self.tree_frame, orient=tk.HORIZONTAL)
         
-        # Funktionen
-        self.func_frame = ttk.LabelFrame(self.builder_frame, text="Funktionen", padding="5")
-        self.func_tree = ttk.Treeview(self.func_frame, columns=("syntax",), height=10)
-        self.func_tree.heading("#0", text="Funktion")
-        self.func_tree.heading("syntax", text="Syntax")
-        self.func_tree.column("#0", width=150)
-        self.func_tree.column("syntax", width=300)
+        # Tree
+        self.var_func_tree = ttk.Treeview(self.paned, height=15)
+        self.var_func_tree.heading("#0", text="Variablen und Funktionen")
         
-        # Buttons für Expression Builder
-        self.expr_button_frame = ttk.Frame(self.expr_frame)
-        self.insert_var_button = ttk.Button(self.expr_button_frame, text="Variable einfügen",
-                                           command=self._insert_variable)
-        self.insert_func_button = ttk.Button(self.expr_button_frame, text="Funktion einfügen",
-                                            command=self._insert_function)
-        self.clear_expr_button = ttk.Button(self.expr_button_frame, text="Leeren",
-                                           command=lambda: self.expr_text.delete("1.0", tk.END))
+        # Hilfe-Bereich
+        self.help_frame = ttk.LabelFrame(self.paned, text="Beschreibung", padding="5")
+        self.help_text = tk.Text(self.help_frame, width=40, height=15, wrap=tk.WORD)
+        self.help_text.config(state=tk.DISABLED)
         
-        # Tab 2: OCR-Zone
+        self.paned.add(self.var_func_tree, weight=2)
+        self.paned.add(self.help_frame, weight=1)
+        
+        # Tab 2: OCR-Zonen
         self.zone_tab_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.zone_tab_frame, text="OCR-Zone")
+        self.notebook.add(self.zone_tab_frame, text="OCR-Zonen")
         
-        # Zone-Konfiguration
-        self.zone_config_frame = ttk.LabelFrame(self.zone_tab_frame, text="Zone definieren", padding="10")
+        # Zone-Liste
+        self.zone_list_frame = ttk.LabelFrame(self.zone_tab_frame, text="Definierte OCR-Zonen", padding="10")
         
-        # Zone-Auswahl Button
-        self.zone_select_button = ttk.Button(self.zone_config_frame, 
-                                           text="Zone grafisch auswählen...",
-                                           command=self._select_zone_graphically)
+        # Zone Toolbar
+        self.zone_toolbar = ttk.Frame(self.zone_list_frame)
+        self.add_zone_button = ttk.Button(self.zone_toolbar, text="➕ Neue Zone", 
+                                         command=self._add_ocr_zone)
+        self.edit_zone_button = ttk.Button(self.zone_toolbar, text="✏️ Bearbeiten", 
+                                          command=self._edit_ocr_zone, state=tk.DISABLED)
+        self.delete_zone_button = ttk.Button(self.zone_toolbar, text="🗑️ Löschen", 
+                                            command=self._delete_ocr_zone, state=tk.DISABLED)
+        self.test_zone_button = ttk.Button(self.zone_toolbar, text="🧪 Zone testen", 
+                                          command=self._test_ocr_zone, state=tk.DISABLED)
         
-        # Manuelle Zone-Eingabe
-        self.zone_manual_frame = ttk.Frame(self.zone_config_frame)
-        ttk.Label(self.zone_manual_frame, text="X:").grid(row=0, column=0, padx=(0, 5))
-        ttk.Spinbox(self.zone_manual_frame, from_=0, to=9999, width=10,
-                   textvariable=self.zone_x_var).grid(row=0, column=1, padx=(0, 15))
-        
-        ttk.Label(self.zone_manual_frame, text="Y:").grid(row=0, column=2, padx=(0, 5))
-        ttk.Spinbox(self.zone_manual_frame, from_=0, to=9999, width=10,
-                   textvariable=self.zone_y_var).grid(row=0, column=3)
-        
-        ttk.Label(self.zone_manual_frame, text="Breite:").grid(row=1, column=0, padx=(0, 5), pady=(5, 0))
-        ttk.Spinbox(self.zone_manual_frame, from_=1, to=9999, width=10,
-                   textvariable=self.zone_w_var).grid(row=1, column=1, padx=(0, 15), pady=(5, 0))
-        
-        ttk.Label(self.zone_manual_frame, text="Höhe:").grid(row=1, column=2, padx=(0, 5), pady=(5, 0))
-        ttk.Spinbox(self.zone_manual_frame, from_=1, to=9999, width=10,
-                   textvariable=self.zone_h_var).grid(row=1, column=3, pady=(5, 0))
-        
-        # Seite
-        self.page_frame = ttk.Frame(self.zone_config_frame)
-        ttk.Label(self.page_frame, text="Seite:").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Spinbox(self.page_frame, from_=1, to=100, width=10,
-                   textvariable=self.page_num_var).pack(side=tk.LEFT)
+        # Zone-Liste
+        self.zone_listbox = tk.Listbox(self.zone_list_frame, height=6)
+        for i, zone_info in enumerate(self.ocr_zones):
+            self.zone_listbox.insert(tk.END, f"{zone_info['name']} - Seite {zone_info['page_num']}")
         
         # Zone-Expression
         self.zone_expr_frame = ttk.LabelFrame(self.zone_tab_frame, text="Zone-Verarbeitung", padding="10")
         self.zone_expr_label = ttk.Label(self.zone_expr_frame, 
-                                        text="Optional: Ausdruck zur Verarbeitung des Zone-Texts (leer = nur Text)")
+                                        text="Optional: Ausdruck zur Verarbeitung des Zone-Texts")
         self.zone_expr_text = tk.Text(self.zone_expr_frame, height=3, width=60)
         self.zone_expr_help = ttk.Label(self.zone_expr_frame, 
-                                       text="Verwenden Sie <ZONE> als Platzhalter für den Zone-Text",
+                                       text="Verwenden Sie <ZONE_X> als Platzhalter für den jeweiligen Zone-Text",
                                        foreground="gray")
-        
-        # Tab 3: Beispiele
-        self.examples_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.examples_frame, text="Beispiele")
-        
-        # Beispiele Text
-        self.examples_text = tk.Text(self.examples_frame, wrap=tk.WORD)
-        self._fill_examples()
-        self.examples_text.config(state=tk.DISABLED)
         
         # Buttons
         self.button_frame = ttk.Frame(self.main_frame)
@@ -398,10 +374,11 @@ class FieldMappingEditDialog:
                                        command=self._on_cancel)
         
         # Events
-        self.var_tree.bind("<Double-Button-1>", lambda e: self._insert_variable())
-        self.func_tree.bind("<Double-Button-1>", lambda e: self._insert_function())
+        self.var_func_tree.bind("<<TreeviewSelect>>", self._on_tree_selection)
+        self.var_func_tree.bind("<Double-Button-1>", self._on_tree_double_click)
+        self.zone_listbox.bind("<<ListboxSelect>>", self._on_zone_selection)
         
-        # Lade verfügbare Variablen und Funktionen
+        # Lade Variablen und Funktionen
         self._load_variables_and_functions()
     
     def _layout_widgets(self):
@@ -418,34 +395,26 @@ class FieldMappingEditDialog:
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         # Expression Tab Layout
-        self.expr_label.pack(anchor=tk.W, pady=(10, 5))
-        self.expr_text.pack(fill=tk.X, pady=(0, 10))
+        self.expr_input_frame.pack(fill=tk.X, pady=(10, 10))
+        self.expr_text.pack(fill=tk.BOTH, expand=True)
         
-        self.builder_frame.pack(fill=tk.BOTH, expand=True)
-        self.var_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        self.var_tree.pack(fill=tk.BOTH, expand=True)
-        
-        self.func_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.func_tree.pack(fill=tk.BOTH, expand=True)
-        
-        self.expr_button_frame.pack(fill=tk.X, pady=(10, 0))
-        self.insert_var_button.pack(side=tk.LEFT, padx=(0, 5))
-        self.insert_func_button.pack(side=tk.LEFT, padx=(0, 5))
-        self.clear_expr_button.pack(side=tk.LEFT)
+        self.tree_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        self.paned.pack(fill=tk.BOTH, expand=True)
+        self.help_text.pack(fill=tk.BOTH, expand=True)
         
         # Zone Tab Layout
-        self.zone_config_frame.pack(fill=tk.X, pady=(10, 10))
-        self.zone_select_button.pack(pady=(0, 10))
-        self.zone_manual_frame.pack(pady=(0, 10))
-        self.page_frame.pack()
+        self.zone_list_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 10))
+        self.zone_toolbar.pack(fill=tk.X, pady=(0, 5))
+        self.add_zone_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.edit_zone_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.delete_zone_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.test_zone_button.pack(side=tk.LEFT)
+        self.zone_listbox.pack(fill=tk.BOTH, expand=True)
         
         self.zone_expr_frame.pack(fill=tk.X, pady=(10, 0))
         self.zone_expr_label.pack(anchor=tk.W)
         self.zone_expr_text.pack(fill=tk.X, pady=(5, 5))
         self.zone_expr_help.pack(anchor=tk.W)
-        
-        # Beispiele Tab Layout
-        self.examples_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Buttons
         self.button_frame.pack(fill=tk.X)
@@ -453,119 +422,276 @@ class FieldMappingEditDialog:
         self.cancel_button.pack(side=tk.RIGHT)
     
     def _load_variables_and_functions(self):
-        """Lädt verfügbare Variablen und Funktionen"""
-        # Variablen
-        var_groups = self.xml_processor.get_available_variables()
-        for group, variables in var_groups.items():
-            group_node = self.var_tree.insert("", "end", text=group, open=True)
-            for var in variables:
-                self.var_tree.insert(group_node, "end", text=var)
+        """Lädt verfügbare Variablen und Funktionen in einen kombinierten Tree"""
+        # Variablen-Hauptknoten
+        var_root = self.var_func_tree.insert("", "end", text="Variablen", open=True)
         
-        # Funktionen
-        func_groups = self.xml_processor.get_available_functions()
-        for group, functions in func_groups.items():
-            group_node = self.func_tree.insert("", "end", text=group, open=True)
-            for func in functions:
-                self.func_tree.insert(group_node, "end", text=func["name"], 
-                                     values=(func["syntax"],))
+        # Standard-Variablen
+        std_node = self.var_func_tree.insert(var_root, "end", text="Standard", open=True)
+        std_vars = [
+            ("Date", "Aktuelles Datum"),
+            ("Time", "Aktuelle Uhrzeit"),
+            ("DateTime", "Datum und Uhrzeit"),
+            ("Year", "Aktuelles Jahr"),
+            ("Month", "Aktueller Monat"),
+            ("Day", "Aktueller Tag"),
+            ("Hour", "Aktuelle Stunde"),
+            ("Minute", "Aktuelle Minute"),
+            ("Second", "Aktuelle Sekunde"),
+            ("Weekday", "Wochentag"),
+            ("WeekNumber", "Kalenderwoche")
+        ]
+        for var, desc in std_vars:
+            self.var_func_tree.insert(std_node, "end", text=var, tags=("variable", desc))
+        
+        # Datei-Variablen
+        file_node = self.var_func_tree.insert(var_root, "end", text="Datei", open=True)
+        file_vars = [
+            ("FileName", "Dateiname ohne Erweiterung"),
+            ("FileExtension", "Dateierweiterung"),
+            ("FullFileName", "Vollständiger Dateiname"),
+            ("FilePath", "Pfad zur Datei"),
+            ("FullPath", "Vollständiger Pfad"),
+            ("FileSize", "Dateigröße in Bytes")
+        ]
+        for var, desc in file_vars:
+            self.var_func_tree.insert(file_node, "end", text=var, tags=("variable", desc))
+        
+        # OCR-Variablen
+        ocr_node = self.var_func_tree.insert(var_root, "end", text="OCR", open=True)
+        self.var_func_tree.insert(ocr_node, "end", text="OCR_FullText", 
+                                 tags=("variable", "Kompletter OCR-Text der PDF"))
+        
+        # OCR-Zonen werden dynamisch hinzugefügt
+        for i, zone_info in enumerate(self.ocr_zones):
+            self.var_func_tree.insert(ocr_node, "end", text=f"ZONE_{i+1}", 
+                                     tags=("variable", f"Text aus {zone_info['name']}"))
+        
+        # Funktionen-Hauptknoten
+        func_root = self.var_func_tree.insert("", "end", text="Funktionen", open=True)
+        
+        # String-Funktionen
+        string_node = self.var_func_tree.insert(func_root, "end", text="String", open=True)
+        string_funcs = [
+            ("FORMAT", 'FORMAT("<VAR>","<FORMATSTRING>")', "Formatiert eine Zeichenkette"),
+            ("TRIM", 'TRIM("<VAR>")', "Entfernt Leerzeichen am Anfang und Ende"),
+            ("LEFT", 'LEFT("<VAR>",<LENGTH>)', "Gibt die ersten n Zeichen zurück"),
+            ("RIGHT", 'RIGHT("<VAR>",<LENGTH>)', "Gibt die letzten n Zeichen zurück"),
+            ("MID", 'MID("<VAR>",<START>,<LENGTH>)', "Gibt Zeichen aus der Mitte zurück"),
+            ("TOUPPER", 'TOUPPER("<VAR>")', "Konvertiert zu Großbuchstaben"),
+            ("TOLOWER", 'TOLOWER("<VAR>")', "Konvertiert zu Kleinbuchstaben"),
+            ("LEN", 'LEN("<VAR>")', "Gibt die Länge der Zeichenkette zurück"),
+            ("INDEXOF", 'INDEXOF(<START>,"<STRING>","<SEARCH>",<CASE>)', "Findet Position eines Zeichens")
+        ]
+        for name, syntax, desc in string_funcs:
+            self.var_func_tree.insert(string_node, "end", text=name, 
+                                     tags=("function", syntax, desc))
+        
+        # Datumsfunktionen
+        date_node = self.var_func_tree.insert(func_root, "end", text="Datum", open=True)
+        self.var_func_tree.insert(date_node, "end", text="FORMATDATE", 
+                                 tags=("function", 'FORMATDATE("<FORMAT>")', 
+                                      "Formatiert das aktuelle Datum\n\nFormatzeichen:\n"
+                                      "dd - Tag mit führender Null\n"
+                                      "mm - Monat mit führender Null\n"
+                                      "yyyy - Jahr vierstellig\n"
+                                      "HH - Stunde (24h)\n"
+                                      "MM - Minute\n"
+                                      "ss - Sekunde"))
+        
+        # Bedingungen
+        cond_node = self.var_func_tree.insert(func_root, "end", text="Bedingungen", open=True)
+        self.var_func_tree.insert(cond_node, "end", text="IF", 
+                                 tags=("function", 
+                                      'IF("<VAR>","<OP>","<VALUE>","<TRUE>","<FALSE>")', 
+                                      "Bedingte Auswertung\n\nOperatoren:\n"
+                                      "= oder == - Gleich\n"
+                                      "!= - Ungleich\n"
+                                      "> - Größer als\n"
+                                      "< - Kleiner als\n"
+                                      ">= - Größer gleich\n"
+                                      "<= - Kleiner gleich\n"
+                                      "contains - Enthält\n"
+                                      "startswith - Beginnt mit\n"
+                                      "endswith - Endet mit"))
+        
+        # RegEx
+        regex_node = self.var_func_tree.insert(func_root, "end", text="Reguläre Ausdrücke", open=True)
+        regex_funcs = [
+            ("REGEXP.MATCH", 'REGEXP.MATCH("<VAR>","<PATTERN>",<INDEX>)', 
+             "Findet Muster mit regulären Ausdrücken\n\n"
+             "INDEX = 0 gibt die erste Übereinstimmung zurück\n"
+             "INDEX > 0 gibt die entsprechende Gruppe zurück"),
+            ("REGEXP.REPLACE", 'REGEXP.REPLACE("<VAR>","<PATTERN>","<REPLACE>")', 
+             "Ersetzt Muster mit regulären Ausdrücken")
+        ]
+        for name, syntax, desc in regex_funcs:
+            self.var_func_tree.insert(regex_node, "end", text=name, 
+                                     tags=("function", syntax, desc))
+        
+        # Numerisch
+        num_node = self.var_func_tree.insert(func_root, "end", text="Numerisch", open=True)
+        self.var_func_tree.insert(num_node, "end", text="AUTOINCREMENT", 
+                                 tags=("function", 'AUTOINCREMENT("<VAR>",<STEP>)', 
+                                      "Zählt einen Wert hoch\n\n"
+                                      "VAR - Startwert\n"
+                                      "STEP - Schrittweite"))
     
-    def _fill_examples(self):
-        """Füllt die Beispiele"""
-        examples = """
-BEISPIELE FÜR AUSDRÜCKE
-
-1. EINFACHE VARIABLEN
-   <FileName>                          - Dateiname ohne Erweiterung
-   <Date>                             - Aktuelles Datum
-   <OCR_FullText>                     - Kompletter OCR-Text
-
-2. DATUMSFUNKTIONEN
-   FORMATDATE("dd.mm.yyyy")           - 31.12.2024
-   FORMATDATE("yyyy-mm-dd")           - 2024-12-31
-   FORMATDATE("dd mmmm yyyy")         - 31 Dezember 2024
-
-3. STRING-FUNKTIONEN
-   LEFT("<FileName>", 5)              - Erste 5 Zeichen des Dateinamens
-   RIGHT("<OCR_FullText>", 10)        - Letzte 10 Zeichen des OCR-Texts
-   TRIM(" Text ")                     - Entfernt Leerzeichen
-   TOUPPER("<FileName>")              - In Großbuchstaben
-   MID("<FileName>", 3, 4)            - 4 Zeichen ab Position 3
-
-4. BEDINGUNGEN
-   IF("<FileName>", "contains", "Rechnung", "Invoice", "Document")
-   IF(LEN("<FileName>"), ">", "10", "Langer Name", "Kurzer Name")
-
-5. REGULÄRE AUSDRÜCKE
-   REGEXP.MATCH("<OCR_FullText>", "Rechnungsnr[.:]\\s*(\\d+)", 1)
-   REGEXP.MATCH("<OCR_FullText>", "(\\d{1,2}[.-/]\\d{1,2}[.-/]\\d{4})", 0)
-   REGEXP.REPLACE("<FileName>", "[^a-zA-Z0-9]", "_")
-
-6. KOMBINATIONEN
-   "Rechnung_" + FORMATDATE("yyyymmdd")
-   LEFT("<FileName>", 10) + "_" + FORMATDATE("HHMMss")
-   IF(REGEXP.MATCH("<OCR_FullText>", "URGENT", 0), "!=", "", "URGENT_", "") + "<FileName>"
-
-7. OCR-ZONEN
-   <ZONE>                             - Zone-Text direkt verwenden
-   TRIM("<ZONE>")                     - Zone-Text ohne Leerzeichen
-   REGEXP.MATCH("<ZONE>", "(\\d+)", 1) - Erste Zahl aus Zone
-"""
-        self.examples_text.insert("1.0", examples)
-    
-    def _insert_variable(self):
-        """Fügt die ausgewählte Variable ein"""
-        selection = self.var_tree.selection()
+    def _on_tree_selection(self, event):
+        """Wird aufgerufen wenn ein Element im Tree ausgewählt wird"""
+        selection = self.var_func_tree.selection()
         if selection:
-            item = self.var_tree.item(selection[0])
-            var_name = item['text']
+            item = self.var_func_tree.item(selection[0])
+            tags = item.get('tags', [])
             
-            # Prüfe ob es eine Gruppe ist
-            parent = self.var_tree.parent(selection[0])
-            if parent:  # Ist eine Variable, keine Gruppe
-                self.expr_text.insert(tk.INSERT, f"<{var_name}>")
+            if len(tags) >= 2:
+                if tags[0] == "variable":
+                    self._update_help(f"Variable: <{item['text']}>\n\n{tags[1]}")
+                elif tags[0] == "function":
+                    syntax = tags[1] if len(tags) > 1 else ""
+                    desc = tags[2] if len(tags) > 2 else ""
+                    self._update_help(f"Funktion: {item['text']}\n\nSyntax:\n{syntax}\n\n{desc}")
     
-    def _insert_function(self):
-        """Fügt die ausgewählte Funktion ein"""
-        selection = self.func_tree.selection()
+    def _on_tree_double_click(self, event):
+        """Doppelklick fügt Variable oder Funktion ein"""
+        selection = self.var_func_tree.selection()
         if selection:
-            item = self.func_tree.item(selection[0])
+            item = self.var_func_tree.item(selection[0])
+            tags = item.get('tags', [])
             
-            # Prüfe ob es eine Gruppe ist
-            parent = self.func_tree.parent(selection[0])
-            if parent:  # Ist eine Funktion, keine Gruppe
-                syntax = item['values'][0]
-                self.expr_text.insert(tk.INSERT, syntax)
+            if tags and tags[0] == "variable":
+                # Variable einfügen
+                self.expr_text.insert(tk.INSERT, f"<{item['text']}>")
+            elif tags and tags[0] == "function" and len(tags) > 1:
+                # Funktion einfügen
+                self.expr_text.insert(tk.INSERT, tags[1])
     
-    def _update_visibility(self):
-        """Aktualisiert die Sichtbarkeit basierend auf dem Source-Typ"""
-        # In dieser Version sind alle Tabs immer sichtbar
-        pass
+    def _update_help(self, text):
+        """Aktualisiert den Hilfetext"""
+        self.help_text.config(state=tk.NORMAL)
+        self.help_text.delete("1.0", tk.END)
+        self.help_text.insert("1.0", text)
+        self.help_text.config(state=tk.DISABLED)
     
-    def _select_zone_graphically(self):
-        """Öffnet den grafischen Zone-Selector"""
+    def _add_ocr_zone(self):
+        """Fügt eine neue OCR-Zone hinzu"""
         pdf_file = filedialog.askopenfilename(
             title="PDF für Zone-Auswahl öffnen",
             filetypes=[("PDF Dateien", "*.pdf"), ("Alle Dateien", "*.*")]
         )
         
         if pdf_file:
-            selector = ZoneSelector(
-                self.dialog, 
-                pdf_path=pdf_file,
-                page_num=self.page_num_var.get()
-            )
+            selector = ZoneSelector(self.dialog, pdf_path=pdf_file)
             result = selector.show()
             
             if result:
-                # Übernehme Zone-Koordinaten
-                zone = result['zone']
-                self.zone_x_var.set(zone[0])
-                self.zone_y_var.set(zone[1])
-                self.zone_w_var.set(zone[2])
-                self.zone_h_var.set(zone[3])
+                zone_index = len(self.ocr_zones) + 1
+                zone_info = {
+                    'zone': result['zone'],
+                    'page_num': result['page_num'],
+                    'name': f'Zone_{zone_index}',
+                    'pdf_path': result['pdf_path']
+                }
+                self.ocr_zones.append(zone_info)
                 
-                # Übernehme Seitennummer
-                self.page_num_var.set(result['page_num'])
+                # Zur Liste hinzufügen
+                self.zone_listbox.insert(tk.END, f"{zone_info['name']} - Seite {zone_info['page_num']}")
+                
+                # Variable im Tree aktualisieren
+                self._refresh_ocr_variables()
+    
+    def _edit_ocr_zone(self):
+        """Bearbeitet die ausgewählte OCR-Zone"""
+        selection = self.zone_listbox.curselection()
+        if not selection:
+            return
+        
+        index = selection[0]
+        zone_info = self.ocr_zones[index]
+        
+        # PDF für Bearbeitung auswählen
+        pdf_file = zone_info.get('pdf_path')
+        if not pdf_file or not os.path.exists(pdf_file):
+            pdf_file = filedialog.askopenfilename(
+                title="PDF für Zone-Bearbeitung öffnen",
+                filetypes=[("PDF Dateien", "*.pdf"), ("Alle Dateien", "*.*")]
+            )
+        
+        if pdf_file:
+            selector = ZoneSelector(
+                self.dialog, 
+                pdf_path=pdf_file,
+                page_num=zone_info['page_num']
+            )
+            # Setze existierende Zone
+            selector.zone = zone_info['zone']
+            result = selector.show()
+            
+            if result:
+                # Aktualisiere Zone
+                zone_info['zone'] = result['zone']
+                zone_info['page_num'] = result['page_num']
+                zone_info['pdf_path'] = result['pdf_path']
+                
+                # Liste aktualisieren
+                self.zone_listbox.delete(index)
+                self.zone_listbox.insert(index, f"{zone_info['name']} - Seite {zone_info['page_num']}")
+    
+    def _delete_ocr_zone(self):
+        """Löscht die ausgewählte OCR-Zone"""
+        selection = self.zone_listbox.curselection()
+        if not selection:
+            return
+        
+        index = selection[0]
+        if messagebox.askyesno("Zone löschen", "Möchten Sie diese OCR-Zone wirklich löschen?"):
+            del self.ocr_zones[index]
+            self.zone_listbox.delete(index)
+            self._refresh_ocr_variables()
+    
+    def _test_ocr_zone(self):
+        """Testet die ausgewählte OCR-Zone"""
+        selection = self.zone_listbox.curselection()
+        if not selection:
+            return
+        
+        index = selection[0]
+        zone_info = self.ocr_zones[index]
+        
+        # Test-Dialog
+        dialog = TestOCRZoneDialog(self.dialog, zone_info, self.xml_processor.ocr_processor)
+        dialog.show()
+    
+    def _refresh_ocr_variables(self):
+        """Aktualisiert die OCR-Variablen im Tree"""
+        # Finde OCR-Knoten
+        for item in self.var_func_tree.get_children(""):
+            if self.var_func_tree.item(item)['text'] == "Variablen":
+                for child in self.var_func_tree.get_children(item):
+                    if self.var_func_tree.item(child)['text'] == "OCR":
+                        # Lösche alle Zone-Variablen
+                        for zone_var in self.var_func_tree.get_children(child):
+                            if self.var_func_tree.item(zone_var)['text'].startswith("ZONE_"):
+                                self.var_func_tree.delete(zone_var)
+                        
+                        # Füge neue Zone-Variablen hinzu
+                        for i, zone_info in enumerate(self.ocr_zones):
+                            self.var_func_tree.insert(child, "end", text=f"ZONE_{i+1}", 
+                                                     tags=("variable", f"Text aus {zone_info['name']}"))
+                        break
+                break
+    
+    def _on_zone_selection(self, event):
+        """Wird aufgerufen wenn eine Zone ausgewählt wird"""
+        selection = self.zone_listbox.curselection()
+        if selection:
+            self.edit_zone_button.config(state=tk.NORMAL)
+            self.delete_zone_button.config(state=tk.NORMAL)
+            self.test_zone_button.config(state=tk.NORMAL)
+        else:
+            self.edit_zone_button.config(state=tk.DISABLED)
+            self.delete_zone_button.config(state=tk.DISABLED)
+            self.test_zone_button.config(state=tk.DISABLED)
     
     def _validate(self) -> bool:
         """Validiert die Eingaben"""
@@ -580,6 +706,15 @@ BEISPIELE FÜR AUSDRÜCKE
                 "Der Feldname darf nur Buchstaben, Zahlen und Unterstriche enthalten.")
             return False
         
+        # Prüfe ob Ausdruck oder Zone definiert
+        expression = self.expr_text.get("1.0", tk.END).strip()
+        zone_expression = self.zone_expr_text.get("1.0", tk.END).strip()
+        
+        if not expression and not self.ocr_zones and not zone_expression:
+            messagebox.showerror("Fehler", 
+                "Bitte definieren Sie einen Ausdruck oder eine OCR-Zone.")
+            return False
+        
         return True
     
     def _on_save(self):
@@ -587,34 +722,37 @@ BEISPIELE FÜR AUSDRÜCKE
         if not self._validate():
             return
         
-        # Bestimme Source-Type basierend auf aktuellem Tab
+        # Bestimme Source-Type und Expression
         current_tab = self.notebook.index(self.notebook.select())
         
-        expression = ""
-        source_type = "expression"
-        zone = None
-        
-        if current_tab == 1:  # OCR-Zone Tab
+        if current_tab == 1 and self.ocr_zones:  # OCR-Zone Tab
+            # Verwende erste Zone (später kann erweitert werden)
+            zone_info = self.ocr_zones[0]
             source_type = "ocr_zone"
-            zone = (
-                self.zone_x_var.get(),
-                self.zone_y_var.get(),
-                self.zone_w_var.get(),
-                self.zone_h_var.get()
-            )
+            zone = zone_info['zone']
+            page_num = zone_info['page_num']
+            
             # Zone-Expression
             zone_expr = self.zone_expr_text.get("1.0", tk.END).strip()
             if zone_expr:
+                # Ersetze ZONE_X Platzhalter
                 expression = zone_expr
+                for i in range(len(self.ocr_zones)):
+                    expression = expression.replace(f"<ZONE_{i+1}>", f"<OCR_Zone_{i+1}>")
+            else:
+                expression = ""
         else:  # Expression Tab
+            source_type = "expression"
             expression = self.expr_text.get("1.0", tk.END).strip()
+            zone = None
+            page_num = 1
         
         self.result = {
             "field_name": self.field_name_var.get().strip(),
             "source_type": source_type,
             "expression": expression,
             "zone": zone,
-            "page_num": self.page_num_var.get()
+            "page_num": page_num
         }
         
         self.dialog.destroy()
@@ -629,6 +767,125 @@ BEISPIELE FÜR AUSDRÜCKE
         return self.result
 
 
+class TestOCRZoneDialog:
+    """Dialog zum Testen einer OCR-Zone"""
+    
+    def __init__(self, parent, zone_info: dict, ocr_processor):
+        self.parent = parent
+        self.zone_info = zone_info
+        self.ocr_processor = ocr_processor
+        
+        # Dialog erstellen
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("OCR-Zone testen")
+        self.dialog.geometry("600x400")
+        self.dialog.resizable(True, True)
+        
+        # Zentriere Dialog
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        self._create_widgets()
+        self._layout_widgets()
+        
+        # Automatisch testen wenn PDF vorhanden
+        if zone_info.get('pdf_path') and os.path.exists(zone_info['pdf_path']):
+            self._run_test()
+    
+    def _create_widgets(self):
+        """Erstellt alle Widgets"""
+        self.main_frame = ttk.Frame(self.dialog, padding="10")
+        
+        # Info
+        info_text = f"Zone: {self.zone_info['name']}\n"
+        info_text += f"Seite: {self.zone_info['page_num']}\n"
+        info_text += f"Position: X={self.zone_info['zone'][0]}, Y={self.zone_info['zone'][1]}\n"
+        info_text += f"Größe: {self.zone_info['zone'][2]}x{self.zone_info['zone'][3]} Pixel"
+        
+        self.info_label = ttk.Label(self.main_frame, text=info_text)
+        
+        # PDF-Auswahl
+        self.pdf_frame = ttk.Frame(self.main_frame)
+        self.pdf_label = ttk.Label(self.pdf_frame, text="PDF-Datei:")
+        self.pdf_path_var = tk.StringVar(value=self.zone_info.get('pdf_path', ''))
+        self.pdf_entry = ttk.Entry(self.pdf_frame, textvariable=self.pdf_path_var, 
+                                  width=40, state='readonly')
+        self.pdf_button = ttk.Button(self.pdf_frame, text="Durchsuchen...", 
+                                    command=self._select_pdf)
+        
+        # Ergebnis
+        self.result_frame = ttk.LabelFrame(self.main_frame, text="OCR-Ergebnis", padding="10")
+        self.result_text = tk.Text(self.result_frame, height=10, wrap=tk.WORD)
+        
+        # Buttons
+        self.button_frame = ttk.Frame(self.main_frame)
+        self.test_button = ttk.Button(self.button_frame, text="Testen", 
+                                     command=self._run_test)
+        self.close_button = ttk.Button(self.button_frame, text="Schließen", 
+                                      command=self.dialog.destroy)
+    
+    def _layout_widgets(self):
+        """Layoutet alle Widgets"""
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.info_label.pack(anchor=tk.W, pady=(0, 10))
+        
+        self.pdf_frame.pack(fill=tk.X, pady=(0, 10))
+        self.pdf_label.pack(side=tk.LEFT, padx=(0, 5))
+        self.pdf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.pdf_button.pack(side=tk.LEFT)
+        
+        self.result_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.result_text.pack(fill=tk.BOTH, expand=True)
+        
+        self.button_frame.pack(fill=tk.X)
+        self.test_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.close_button.pack(side=tk.LEFT)
+    
+    def _select_pdf(self):
+        """Wählt eine PDF-Datei aus"""
+        filename = filedialog.askopenfilename(
+            title="PDF auswählen",
+            filetypes=[("PDF Dateien", "*.pdf"), ("Alle Dateien", "*.*")],
+            initialfile=self.pdf_path_var.get()
+        )
+        
+        if filename:
+            self.pdf_path_var.set(filename)
+            self.zone_info['pdf_path'] = filename
+    
+    def _run_test(self):
+        """Führt den OCR-Test aus"""
+        pdf_path = self.pdf_path_var.get()
+        if not pdf_path or not os.path.exists(pdf_path):
+            messagebox.showerror("Fehler", "Bitte wählen Sie eine gültige PDF-Datei.")
+            return
+        
+        try:
+            # Führe OCR aus
+            text = self.ocr_processor.extract_text_from_zone(
+                pdf_path,
+                self.zone_info['page_num'],
+                self.zone_info['zone'],
+                language='deu'
+            )
+            
+            # Zeige Ergebnis
+            self.result_text.delete("1.0", tk.END)
+            if text:
+                self.result_text.insert("1.0", text)
+            else:
+                self.result_text.insert("1.0", "(Kein Text erkannt)")
+                
+        except Exception as e:
+            self.result_text.delete("1.0", tk.END)
+            self.result_text.insert("1.0", f"Fehler: {e}")
+    
+    def show(self):
+        """Zeigt den Dialog"""
+        self.dialog.wait_window()
+
+
 class TestMappingDialog:
     """Dialog zum Testen eines Mappings"""
     
@@ -640,7 +897,7 @@ class TestMappingDialog:
         # Dialog erstellen
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Mapping testen")
-        self.dialog.geometry("600x400")
+        self.dialog.geometry("700x600")
         self.dialog.resizable(True, True)
         
         # Zentriere Dialog
@@ -664,18 +921,39 @@ class TestMappingDialog:
         self.expr_text.insert("1.0", self.mapping.expression)
         self.expr_text.config(state=tk.DISABLED)
         
-        # Test-Eingabe
-        self.input_frame = ttk.LabelFrame(self.main_frame, text="Test-Variablen", padding="10")
-        self.input_text = tk.Text(self.input_frame, height=6)
-        self.input_text.insert("1.0", 
-            "# Geben Sie Test-Werte für Variablen ein:\n"
-            "FileName=TestDokument\n"
-            "OCR_FullText=Dies ist ein Test-Text\n"
-            "Date=31.12.2024\n")
+        # Test-Dateien
+        self.files_frame = ttk.LabelFrame(self.main_frame, text="Test-Dateien", padding="10")
+        
+        # PDF
+        self.pdf_frame = ttk.Frame(self.files_frame)
+        self.pdf_label = ttk.Label(self.pdf_frame, text="PDF-Datei:")
+        self.pdf_path_var = tk.StringVar()
+        self.pdf_entry = ttk.Entry(self.pdf_frame, textvariable=self.pdf_path_var, 
+                                  width=40, state='readonly')
+        self.pdf_button = ttk.Button(self.pdf_frame, text="Durchsuchen...", 
+                                    command=self._select_pdf)
+        
+        # XML
+        self.xml_frame = ttk.Frame(self.files_frame)
+        self.xml_label = ttk.Label(self.xml_frame, text="XML-Datei (optional):")
+        self.xml_path_var = tk.StringVar()
+        self.xml_entry = ttk.Entry(self.xml_frame, textvariable=self.xml_path_var, 
+                                  width=40, state='readonly')
+        self.xml_button = ttk.Button(self.xml_frame, text="Durchsuchen...", 
+                                    command=self._select_xml)
+        
+        # Test-Variablen
+        self.vars_frame = ttk.LabelFrame(self.main_frame, text="Test-Variablen überschreiben (optional)", padding="10")
+        self.vars_text = tk.Text(self.vars_frame, height=4)
+        self.vars_text.insert("1.0", 
+            "# Format: VariablenName=Wert\n"
+            "# Beispiel:\n"
+            "# FileName=TestDokument\n"
+            "# Date=01.01.2024\n")
         
         # Ergebnis
         self.result_frame = ttk.LabelFrame(self.main_frame, text="Ergebnis", padding="10")
-        self.result_text = tk.Text(self.result_frame, height=4)
+        self.result_text = tk.Text(self.result_frame, height=6)
         self.result_text.config(state=tk.DISABLED)
         
         # Buttons
@@ -694,38 +972,91 @@ class TestMappingDialog:
         self.expr_frame.pack(fill=tk.X, pady=(0, 10))
         self.expr_text.pack(fill=tk.X)
         
-        self.input_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        self.input_text.pack(fill=tk.BOTH, expand=True)
+        self.files_frame.pack(fill=tk.X, pady=(0, 10))
         
-        self.result_frame.pack(fill=tk.X, pady=(0, 10))
-        self.result_text.pack(fill=tk.X)
+        self.pdf_frame.pack(fill=tk.X, pady=(0, 5))
+        self.pdf_label.pack(side=tk.LEFT, padx=(0, 5))
+        self.pdf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.pdf_button.pack(side=tk.LEFT)
+        
+        self.xml_frame.pack(fill=tk.X)
+        self.xml_label.pack(side=tk.LEFT, padx=(0, 5))
+        self.xml_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.xml_button.pack(side=tk.LEFT)
+        
+        self.vars_frame.pack(fill=tk.X, pady=(0, 10))
+        self.vars_text.pack(fill=tk.X)
+        
+        self.result_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.result_text.pack(fill=tk.BOTH, expand=True)
         
         self.button_frame.pack(fill=tk.X)
         self.test_button.pack(side=tk.LEFT, padx=(0, 5))
         self.close_button.pack(side=tk.LEFT)
     
+    def _select_pdf(self):
+        """Wählt eine PDF-Datei aus"""
+        filename = filedialog.askopenfilename(
+            title="PDF für Test auswählen",
+            filetypes=[("PDF Dateien", "*.pdf"), ("Alle Dateien", "*.*")]
+        )
+        
+        if filename:
+            self.pdf_path_var.set(filename)
+    
+    def _select_xml(self):
+        """Wählt eine XML-Datei aus"""
+        filename = filedialog.askopenfilename(
+            title="XML für Test auswählen",
+            filetypes=[("XML Dateien", "*.xml"), ("Alle Dateien", "*.*")]
+        )
+        
+        if filename:
+            self.xml_path_var.set(filename)
+    
     def _run_test(self):
         """Führt den Test aus"""
-        # Parse Test-Variablen
-        context = {}
-        for line in self.input_text.get("1.0", tk.END).strip().split("\n"):
+        pdf_path = self.pdf_path_var.get()
+        if not pdf_path:
+            messagebox.showerror("Fehler", "Bitte wählen Sie eine PDF-Datei für den Test.")
+            return
+        
+        xml_path = self.xml_path_var.get() or None
+        
+        # Baue Kontext auf
+        context = self.xml_processor._build_context(
+            xml_path or "", 
+            pdf_path, 
+            [self.mapping]
+        )
+        
+        # Überschreibe mit Test-Variablen
+        for line in self.vars_text.get("1.0", tk.END).strip().split("\n"):
             if "=" in line and not line.startswith("#"):
                 key, value = line.split("=", 1)
                 context[key.strip()] = value.strip()
         
-        # Füge Standard-Variablen hinzu
-        from core.function_parser import VariableExtractor
-        context.update(VariableExtractor.get_standard_variables())
-        
         # Evaluiere Expression
         try:
-            from core.function_parser import FunctionParser
-            parser = FunctionParser()
-            result = parser.parse_and_evaluate(self.mapping.expression, context)
+            result = self.xml_processor._evaluate_mapping(self.mapping, context)
             
             self.result_text.config(state=tk.NORMAL)
             self.result_text.delete("1.0", tk.END)
-            self.result_text.insert("1.0", result)
+            
+            if result is not None:
+                self.result_text.insert("1.0", f"Ergebnis: {result}\n\n")
+                
+                # Zeige verwendete Variablen
+                self.result_text.insert(tk.END, "Verwendete Variablen:\n")
+                for key, value in sorted(context.items()):
+                    if len(str(value)) > 50:
+                        value_str = str(value)[:50] + "..."
+                    else:
+                        value_str = str(value)
+                    self.result_text.insert(tk.END, f"{key} = {value_str}\n")
+            else:
+                self.result_text.insert("1.0", "Kein Ergebnis")
+                
             self.result_text.config(state=tk.DISABLED)
             
         except Exception as e:

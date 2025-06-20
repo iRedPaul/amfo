@@ -1,0 +1,53 @@
+{
+  "hotfolders": [
+    {
+      "id": "55f68f60-ca9a-45e5-9719-109493660085",
+      "name": "Test Hotfolder",
+      "input_path": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Input",
+      "output_path": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Output",
+      "enabled": true,
+      "process_pairs": true,
+      "actions": [
+        "ocr",
+        "pdf_a"
+      ],
+      "action_params": {},
+      "file_patterns": [
+        "*.pdf"
+      ],
+      "xml_field_mappings": [
+        {
+          "field_name": "Projektname",
+          "description": "",
+          "source_type": "expression",
+          "expression": "<Nummer>",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Test",
+          "description": "Die ist ein Test",
+          "source_type": "expression",
+          "expression": "Test",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        }
+      ],
+      "output_filename_expression": "<FileName>",
+      "ocr_zones": [
+        {
+          "name": "Nummer",
+          "zone": [
+            1904,
+            748,
+            314,
+            228
+          ],
+          "page_num": 1
+        }
+      ]
+    }
+  ]
+}

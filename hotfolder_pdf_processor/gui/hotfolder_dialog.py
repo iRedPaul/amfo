@@ -40,6 +40,7 @@ class HotfolderDialog:
         
         # Variablen
         self.name_var = tk.StringVar(value=hotfolder.name if hotfolder else "")
+        self.description_var = tk.StringVar(value=hotfolder.description if hotfolder and hasattr(hotfolder, 'description') else "")
         self.input_path_var = tk.StringVar(value=hotfolder.input_path if hotfolder else "")
         self.process_pairs_var = tk.BooleanVar(value=hotfolder.process_pairs if hotfolder else True)
         
@@ -118,10 +119,20 @@ class HotfolderDialog:
         self.basic_frame = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.basic_frame, text="Grundeinstellungen")
         
-        # Name und Pfade
+        # Name
         self.name_label = ttk.Label(self.basic_frame, text="Name:")
         self.name_entry = ttk.Entry(self.basic_frame, textvariable=self.name_var, width=50)
         
+        # Beschreibung
+        self.description_label = ttk.Label(self.basic_frame, text="Beschreibung (optional):")
+        self.description_frame = ttk.Frame(self.basic_frame)
+        self.description_text = tk.Text(self.description_frame, height=3, width=50, wrap=tk.WORD)
+        self.description_text.insert("1.0", self.description_var.get())
+        self.description_scroll = ttk.Scrollbar(self.description_frame, orient="vertical", 
+                                              command=self.description_text.yview)
+        self.description_text.configure(yscrollcommand=self.description_scroll.set)
+        
+        # Input-Pfad
         self.input_label = ttk.Label(self.basic_frame, text="Überwachter Ordner (Input):")
         self.input_frame = ttk.Frame(self.basic_frame)
         self.input_entry = ttk.Entry(self.input_frame, textvariable=self.input_path_var, width=40)
@@ -304,18 +315,24 @@ class HotfolderDialog:
         self.name_label.grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         self.name_entry.grid(row=0, column=1, sticky="we", pady=(0, 5))
         
+        # Beschreibung
+        self.description_label.grid(row=1, column=0, sticky="nw", pady=(10, 5))
+        self.description_frame.grid(row=1, column=1, sticky="we", pady=(10, 5))
+        self.description_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.description_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
         # Input
-        self.input_label.grid(row=1, column=0, sticky=tk.W, pady=(10, 5))
-        self.input_frame.grid(row=1, column=1, sticky="we", pady=(10, 5))
+        self.input_label.grid(row=2, column=0, sticky=tk.W, pady=(10, 5))
+        self.input_frame.grid(row=2, column=1, sticky="we", pady=(10, 5))
         self.input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.input_button.pack(side=tk.LEFT, padx=(5, 0))
         
         # Verarbeitungsoptionen
-        self.processing_frame.grid(row=2, column=0, columnspan=2, sticky="we", pady=(20, 10))
+        self.processing_frame.grid(row=3, column=0, columnspan=2, sticky="we", pady=(20, 10))
         self.process_pairs_check.pack(anchor=tk.W)
         
         # Aktionen
-        self.actions_frame.grid(row=3, column=0, columnspan=2, sticky="we", pady=(10, 0))
+        self.actions_frame.grid(row=4, column=0, columnspan=2, sticky="we", pady=(10, 0))
         
         self.basic_frame.columnconfigure(1, weight=1)
         
@@ -822,6 +839,9 @@ class HotfolderDialog:
         selected_actions = [action.value for action, var in self.action_vars.items() 
                            if var.get()]
         
+        # Hole Beschreibung aus dem Text-Widget
+        description = self.description_text.get("1.0", tk.END).strip()
+        
         # Setze Output-Path auf Input-Path wenn keine Exporte definiert
         # Dies ist für Legacy-Kompatibilität
         if not self.export_configs:
@@ -832,6 +852,7 @@ class HotfolderDialog:
         
         self.result = {
             "name": self.name_var.get().strip(),
+            "description": description,
             "input_path": self.input_path_var.get().strip(),
             "output_path": output_path,  # Legacy-Feld
             "process_pairs": self.process_pairs_var.get(),

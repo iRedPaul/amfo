@@ -10,10 +10,11 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.hotfolder_config import HotfolderConfig, ProcessingAction, OCRZone
+from models.export_config import ExportConfig, ExportFormat, ExportMethod
 from gui.xml_field_dialog import XMLFieldDialog
 from gui.zone_selector import ZoneSelector
 from gui.expression_dialog import ExpressionDialog
-from gui.export_dialog import ExportDialog
+from gui.export_dialog import ExportEditDialog
 
 
 class HotfolderDialog:
@@ -27,7 +28,7 @@ class HotfolderDialog:
         # Erstelle Dialog
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Hotfolder bearbeiten" if hotfolder else "Neuer Hotfolder")
-        self.dialog.geometry("800x700")
+        self.dialog.geometry("900x800")
         self.dialog.resizable(True, True)
         
         # Zentriere Dialog relativ zum Parent
@@ -42,10 +43,9 @@ class HotfolderDialog:
         self.input_path_var = tk.StringVar(value=hotfolder.input_path if hotfolder else "")
         self.process_pairs_var = tk.BooleanVar(value=hotfolder.process_pairs if hotfolder else True)
         
-        # Action Variablen - nur noch die Basis-Aktionen
+        # Action Variablen - OCR wurde entfernt
         self.action_vars = {}
-        # Entferne PDF_A aus den Basis-Aktionen
-        basic_actions = [ProcessingAction.COMPRESS, ProcessingAction.SPLIT, ProcessingAction.OCR]
+        basic_actions = [ProcessingAction.COMPRESS, ProcessingAction.SPLIT]
         for action in basic_actions:
             is_selected = hotfolder and action in hotfolder.actions
             self.action_vars[action] = tk.BooleanVar(value=is_selected)
@@ -71,8 +71,9 @@ class HotfolderDialog:
         self._create_widgets()
         self._layout_widgets()
         
-        # Initialisiere Button-Texte
+        # Initialisiere Button-Texte und Export-Liste
         self._update_button_texts()
+        self._refresh_export_list()
         
         # Fokus auf erstes Eingabefeld
         self.name_entry.focus()
@@ -137,7 +138,7 @@ class HotfolderDialog:
             command=self._on_process_pairs_toggle
         )
         
-        # Basis-Aktionen (ohne PDF/A, das ist jetzt nur noch bei Export)
+        # Basis-Aktionen (ohne OCR)
         self.actions_frame = ttk.LabelFrame(self.basic_frame, text="Vorverarbeitungsschritte", padding="10")
         
         action_descriptions = {
@@ -148,10 +149,6 @@ class HotfolderDialog:
             ProcessingAction.SPLIT: {
                 "text": "In Einzelseiten aufteilen",
                 "desc": "Teilt mehrseitige PDFs in einzelne Dateien auf"
-            },
-            ProcessingAction.OCR: {
-                "text": "Texterkennung durchführen",
-                "desc": "Macht PDFs durchsuchbar (OCR)"
             }
         }
         
@@ -172,7 +169,20 @@ class HotfolderDialog:
         self.extraction_frame = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.extraction_frame, text="Datenextraktion")
         
-        # OCR-Zonen
+        # XML-Felder (jetzt oben)
+        self.xml_frame = ttk.LabelFrame(self.extraction_frame, text="XML-Feldverarbeitung", padding="10")
+        self.xml_desc = ttk.Label(self.xml_frame, 
+            text="Konfigurieren Sie, wie XML-Felder befüllt werden sollen.",
+            wraplength=600, foreground="gray")
+        
+        self.xml_fields_button = ttk.Button(
+            self.xml_frame,
+            text="XML-Felder konfigurieren...",
+            command=self._configure_xml_fields,
+            state=tk.NORMAL if self.process_pairs_var.get() else tk.DISABLED
+        )
+        
+        # OCR-Zonen (jetzt unten)
         self.ocr_zones_frame = ttk.LabelFrame(self.extraction_frame, text="OCR-Zonen", padding="10")
         self.ocr_zones_desc = ttk.Label(self.ocr_zones_frame, 
             text="Definieren Sie Bereiche im PDF, aus denen Text extrahiert werden soll.",
@@ -193,46 +203,87 @@ class HotfolderDialog:
         self.zones_listbox = tk.Listbox(self.ocr_zones_frame, height=6)
         self.zones_listbox.bind('<<ListboxSelect>>', self._on_zone_selection)
         
-        # XML-Felder
-        self.xml_frame = ttk.LabelFrame(self.extraction_frame, text="XML-Feldverarbeitung", padding="10")
-        self.xml_desc = ttk.Label(self.xml_frame, 
-            text="Konfigurieren Sie, wie XML-Felder befüllt werden sollen.",
-            wraplength=600, foreground="gray")
-        
-        self.xml_fields_button = ttk.Button(
-            self.xml_frame,
-            text="XML-Felder konfigurieren...",
-            command=self._configure_xml_fields,
-            state=tk.NORMAL if self.process_pairs_var.get() else tk.DISABLED
-        )
-        
-        # Tab 3: Export
+        # Tab 3: Export (komplett überarbeitet mit integrierter Liste)
         self.export_frame = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.export_frame, text="Export")
         
         # Export-Beschreibung
-        self.export_desc_frame = ttk.Frame(self.export_frame)
-        self.export_desc = ttk.Label(self.export_desc_frame, 
+        self.export_desc = ttk.Label(self.export_frame, 
             text="Konfigurieren Sie, wie und wohin die verarbeiteten Dokumente exportiert werden sollen. "
                  "Sie können mehrere Exporte definieren (z.B. PDF/A als Datei speichern UND per E-Mail versenden).",
-            wraplength=650, justify=tk.LEFT)
+            wraplength=750, justify=tk.LEFT)
         
-        # Export-Button
-        self.export_button_frame = ttk.Frame(self.export_frame)
-        self.export_button = ttk.Button(
-            self.export_button_frame,
-            text="Exporte konfigurieren...",
-            command=self._configure_exports,
-            style="Accent.TButton"
-        )
+        # Export-Liste Frame
+        self.export_list_frame = ttk.LabelFrame(self.export_frame, text="Export-Konfigurationen", padding="10")
+        
+        # Toolbar für Export-Liste
+        self.export_toolbar = ttk.Frame(self.export_list_frame)
+        self.add_export_button = ttk.Button(self.export_toolbar, text="➕ Neuer Export", 
+                                           command=self._add_export)
+        self.edit_export_button = ttk.Button(self.export_toolbar, text="✏️ Bearbeiten", 
+                                            command=self._edit_export, state=tk.DISABLED)
+        self.duplicate_export_button = ttk.Button(self.export_toolbar, text="📋 Duplizieren", 
+                                                 command=self._duplicate_export, state=tk.DISABLED)
+        self.delete_export_button = ttk.Button(self.export_toolbar, text="🗑️ Löschen", 
+                                              command=self._delete_export, state=tk.DISABLED)
+        
+        ttk.Separator(self.export_toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        
+        self.move_up_export_button = ttk.Button(self.export_toolbar, text="⬆", width=3,
+                                               command=self._move_export_up, state=tk.DISABLED)
+        self.move_down_export_button = ttk.Button(self.export_toolbar, text="⬇", width=3,
+                                                 command=self._move_export_down, state=tk.DISABLED)
+        
+        # Export-Liste (TreeView)
+        self.export_tree_frame = ttk.Frame(self.export_list_frame)
+        self.export_tree = ttk.Treeview(self.export_tree_frame, 
+                                       columns=("Name", "Aktiv", "Methode", "Format", "Pfad"),
+                                       show="tree headings", height=10)
+        
+        # Spalten konfigurieren
+        self.export_tree.heading("#0", text="")
+        self.export_tree.heading("Name", text="Name")
+        self.export_tree.heading("Aktiv", text="Aktiv")
+        self.export_tree.heading("Methode", text="Methode")
+        self.export_tree.heading("Format", text="Format")
+        self.export_tree.heading("Pfad", text="Pfad/Ziel")
+        
+        self.export_tree.column("#0", width=30)
+        self.export_tree.column("Name", width=180)
+        self.export_tree.column("Aktiv", width=50, anchor=tk.CENTER)
+        self.export_tree.column("Methode", width=80)
+        self.export_tree.column("Format", width=100)
+        self.export_tree.column("Pfad", width=300)
+        
+        # Scrollbar für Export-Liste
+        self.export_vsb = ttk.Scrollbar(self.export_tree_frame, orient="vertical", 
+                                       command=self.export_tree.yview)
+        self.export_tree.configure(yscrollcommand=self.export_vsb.set)
+        
+        # Fehlerbehandlung
+        self.error_frame = ttk.LabelFrame(self.export_frame, text="Fehlerbehandlung", padding="10")
+        
+        self.error_path_label = ttk.Label(self.error_frame, 
+            text="Fehlerpfad (optional - leer = Standard aus Einstellungen):")
+        self.error_path_desc = ttk.Label(self.error_frame,
+            text="Dateien, die nicht verarbeitet werden können, werden in diesen Ordner verschoben.",
+            foreground="gray", font=('TkDefaultFont', 9))
+        
+        self.error_path_frame = ttk.Frame(self.error_frame)
+        self.error_path_var = tk.StringVar(value=self.error_path)
+        self.error_path_entry = ttk.Entry(self.error_path_frame, 
+                                         textvariable=self.error_path_var, width=50)
+        self.error_path_button = ttk.Button(self.error_path_frame, text="Durchsuchen...", 
+                                           command=self._browse_error_path)
         
         # Info wenn keine Exporte
         self.no_export_info = ttk.Label(self.export_frame, 
             text="⚠️ Hinweis: Wenn keine Exporte konfiguriert sind, werden die Dateien nur in einen Output-Ordner verschoben.",
-            foreground="orange", wraplength=650)
+            foreground="orange", wraplength=750)
         
-        # Legacy Output (versteckt, nur für Abwärtskompatibilität)
-        # Wird intern auf einen Standardwert gesetzt
+        # Events für Export-Liste
+        self.export_tree.bind("<<TreeviewSelect>>", self._on_export_selection_changed)
+        self.export_tree.bind("<Double-Button-1>", lambda e: self._edit_export())
         
         # Buttons
         self.button_frame = ttk.Frame(self.main_frame)
@@ -269,8 +320,13 @@ class HotfolderDialog:
         self.basic_frame.columnconfigure(1, weight=1)
         
         # Tab 2: Datenextraktion
-        # OCR-Zonen
-        self.ocr_zones_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        # XML-Felder (jetzt oben)
+        self.xml_frame.pack(fill=tk.X, pady=(0, 10))
+        self.xml_desc.pack(anchor=tk.W, pady=(0, 10))
+        self.xml_fields_button.pack(anchor=tk.W)
+        
+        # OCR-Zonen (jetzt unten)
+        self.ocr_zones_frame.pack(fill=tk.BOTH, expand=True)
         self.ocr_zones_desc.pack(anchor=tk.W, pady=(0, 10))
         self.ocr_toolbar.pack(fill=tk.X, pady=(0, 5))
         self.add_zone_button.pack(side=tk.LEFT, padx=(0, 5))
@@ -279,20 +335,38 @@ class HotfolderDialog:
         self.delete_zone_button.pack(side=tk.LEFT)
         self.zones_listbox.pack(fill=tk.BOTH, expand=True)
         
-        # XML-Felder
-        self.xml_frame.pack(fill=tk.X, pady=(10, 0))
-        self.xml_desc.pack(anchor=tk.W, pady=(0, 10))
-        self.xml_fields_button.pack(anchor=tk.W)
-        
         # Tab 3: Export
-        self.export_desc_frame.pack(fill=tk.X, pady=(0, 15))
-        self.export_desc.pack()
+        self.export_desc.pack(fill=tk.X, pady=(0, 10))
         
-        self.export_button_frame.pack(pady=(0, 20))
-        self.export_button.pack()
+        # Export-Liste
+        self.export_list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
+        self.export_toolbar.pack(fill=tk.X, pady=(0, 10))
+        self.add_export_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.edit_export_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.duplicate_export_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.delete_export_button.pack(side=tk.LEFT)
+        
+        self.move_up_export_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.move_down_export_button.pack(side=tk.LEFT)
+        
+        self.export_tree_frame.pack(fill=tk.BOTH, expand=True)
+        self.export_tree.grid(row=0, column=0, sticky="nsew")
+        self.export_vsb.grid(row=0, column=1, sticky="ns")
+        self.export_tree_frame.grid_columnconfigure(0, weight=1)
+        self.export_tree_frame.grid_rowconfigure(0, weight=1)
+        
+        # Fehlerbehandlung
+        self.error_frame.pack(fill=tk.X, pady=(0, 10))
+        self.error_path_label.pack(anchor=tk.W)
+        self.error_path_desc.pack(anchor=tk.W, pady=(2, 8))
+        self.error_path_frame.pack(fill=tk.X)
+        self.error_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.error_path_button.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Info wenn keine Exporte
         if not self.export_configs:
-            self.no_export_info.pack(pady=(20, 0))
+            self.no_export_info.pack(pady=(10, 0))
         
         # Buttons
         self.button_frame.pack(fill=tk.X)
@@ -309,6 +383,199 @@ class HotfolderDialog:
             zone_text = f"{zone['name']} - Seite {zone['page_num']}"
             self.zones_listbox.insert(tk.END, zone_text)
     
+    def _refresh_export_list(self):
+        """Aktualisiert die Export-Liste"""
+        # Lösche alle Einträge
+        for item in self.export_tree.get_children():
+            self.export_tree.delete(item)
+        
+        # Füge Exporte hinzu
+        for export_dict in self.export_configs:
+            export = ExportConfig.from_dict(export_dict)
+            self._add_export_to_tree(export)
+        
+        # Verstecke/Zeige Info
+        if self.export_configs:
+            self.no_export_info.pack_forget()
+        else:
+            self.no_export_info.pack(pady=(10, 0))
+    
+    def _add_export_to_tree(self, export: ExportConfig):
+        """Fügt einen Export zur TreeView hinzu"""
+        aktiv = "✓" if export.enabled else "✗"
+        
+        methode = {
+            ExportMethod.FILE: "Datei",
+            ExportMethod.EMAIL: "E-Mail",
+            ExportMethod.FTP: "FTP",
+            ExportMethod.WEBDAV: "WebDAV"
+        }.get(export.export_method, export.export_method.value)
+        
+        format_name = {
+            ExportFormat.PDF: "PDF",
+            ExportFormat.PDF_A: "PDF/A",
+            ExportFormat.SEARCHABLE_PDF_A: "Durchsuchbares PDF/A",
+            ExportFormat.PNG: "PNG",
+            ExportFormat.JPG: "JPG",
+            ExportFormat.TIFF: "TIFF",
+            ExportFormat.XML: "XML",
+            ExportFormat.JSON: "JSON",
+            ExportFormat.TXT: "Text",
+            ExportFormat.CSV: "CSV"
+        }.get(export.export_format, export.export_format.value)
+        
+        # Ziel je nach Methode
+        if export.export_method == ExportMethod.EMAIL and export.email_config:
+            ziel = export.email_config.recipient
+        else:
+            ziel = export.export_path_expression[:50] + "..." if len(export.export_path_expression) > 50 else export.export_path_expression
+        
+        self.export_tree.insert("", "end", values=(export.name, aktiv, methode, format_name, ziel))
+    
+    def _on_export_selection_changed(self, event):
+        """Wird aufgerufen wenn die Export-Auswahl sich ändert"""
+        selection = self.export_tree.selection()
+        if selection:
+            self.edit_export_button.config(state=tk.NORMAL)
+            self.duplicate_export_button.config(state=tk.NORMAL)
+            self.delete_export_button.config(state=tk.NORMAL)
+            
+            # Prüfe ob Bewegung möglich ist
+            index = self.export_tree.index(selection[0])
+            self.move_up_export_button.config(state=tk.NORMAL if index > 0 else tk.DISABLED)
+            self.move_down_export_button.config(state=tk.NORMAL if index < len(self.export_configs) - 1 else tk.DISABLED)
+        else:
+            self.edit_export_button.config(state=tk.DISABLED)
+            self.duplicate_export_button.config(state=tk.DISABLED)
+            self.delete_export_button.config(state=tk.DISABLED)
+            self.move_up_export_button.config(state=tk.DISABLED)
+            self.move_down_export_button.config(state=tk.DISABLED)
+    
+    def _add_export(self):
+        """Fügt einen neuen Export hinzu"""
+        dialog = ExportEditDialog(self.dialog, xml_field_mappings=self.xml_field_mappings)
+        result = dialog.show()
+        
+        if result:
+            self.export_configs.append(result)
+            self._refresh_export_list()
+            self._update_button_texts()
+    
+    def _edit_export(self):
+        """Bearbeitet den ausgewählten Export"""
+        selection = self.export_tree.selection()
+        if not selection:
+            return
+        
+        item = selection[0]
+        index = self.export_tree.index(item)
+        
+        if 0 <= index < len(self.export_configs):
+            export_dict = self.export_configs[index]
+            export = ExportConfig.from_dict(export_dict)
+            
+            dialog = ExportEditDialog(self.dialog, export, self.xml_field_mappings)
+            result = dialog.show()
+            
+            if result:
+                # Behalte die ID bei
+                result['id'] = export.id
+                self.export_configs[index] = result
+                self._refresh_export_list()
+                self._update_button_texts()
+    
+    def _duplicate_export(self):
+        """Dupliziert den ausgewählten Export"""
+        selection = self.export_tree.selection()
+        if not selection:
+            return
+        
+        item = selection[0]
+        index = self.export_tree.index(item)
+        
+        if 0 <= index < len(self.export_configs):
+            import uuid
+            export_dict = self.export_configs[index].copy()
+            export = ExportConfig.from_dict(export_dict)
+            
+            # Neue ID und Name
+            export.id = str(uuid.uuid4())
+            export.name = f"{export.name} (Kopie)"
+            
+            self.export_configs.append(export.to_dict())
+            self._refresh_export_list()
+            self._update_button_texts()
+    
+    def _delete_export(self):
+        """Löscht den ausgewählten Export"""
+        selection = self.export_tree.selection()
+        if not selection:
+            return
+        
+        if messagebox.askyesno("Export löschen", "Möchten Sie diesen Export wirklich löschen?"):
+            item = selection[0]
+            index = self.export_tree.index(item)
+            
+            if 0 <= index < len(self.export_configs):
+                del self.export_configs[index]
+                self._refresh_export_list()
+                self._update_button_texts()
+    
+    def _move_export_up(self):
+        """Bewegt den Export nach oben"""
+        selection = self.export_tree.selection()
+        if not selection:
+            return
+        
+        item = selection[0]
+        index = self.export_tree.index(item)
+        
+        if index > 0:
+            # Tausche in der Liste
+            self.export_configs[index], self.export_configs[index-1] = \
+                self.export_configs[index-1], self.export_configs[index]
+            
+            # Aktualisiere Tree
+            self._refresh_export_list()
+            
+            # Behalte Auswahl
+            new_items = self.export_tree.get_children()
+            if index-1 < len(new_items):
+                self.export_tree.selection_set(new_items[index-1])
+                self.export_tree.focus(new_items[index-1])
+    
+    def _move_export_down(self):
+        """Bewegt den Export nach unten"""
+        selection = self.export_tree.selection()
+        if not selection:
+            return
+        
+        item = selection[0]
+        index = self.export_tree.index(item)
+        
+        if index < len(self.export_configs) - 1:
+            # Tausche in der Liste
+            self.export_configs[index], self.export_configs[index+1] = \
+                self.export_configs[index+1], self.export_configs[index]
+            
+            # Aktualisiere Tree
+            self._refresh_export_list()
+            
+            # Behalte Auswahl
+            new_items = self.export_tree.get_children()
+            if index+1 < len(new_items):
+                self.export_tree.selection_set(new_items[index+1])
+                self.export_tree.focus(new_items[index+1])
+    
+    def _browse_error_path(self):
+        """Öffnet Dialog zur Auswahl des Fehler-Pfads"""
+        folder = filedialog.askdirectory(
+            title="Fehlerpfad auswählen",
+            initialdir=self.error_path_var.get() or os.path.expanduser("~")
+        )
+        if folder:
+            self.error_path_var.set(folder)
+    
     def _update_button_texts(self):
         """Aktualisiert Button-Texte basierend auf Zustand"""
         if self.xml_field_mappings:
@@ -323,18 +590,13 @@ class HotfolderDialog:
         else:
             self.ocr_zones_frame.config(text="OCR-Zonen")
         
+        # Export-Konfigurationen werden jetzt in der Liste angezeigt
         if self.export_configs:
             count = len(self.export_configs)
             active_count = sum(1 for ec in self.export_configs if ec.get('enabled', True))
-            self.export_button.config(text=f"Exporte konfigurieren... ({active_count} von {count} aktiv)")
-            # Verstecke Hinweis wenn Exporte konfiguriert
-            if hasattr(self, 'no_export_info'):
-                self.no_export_info.pack_forget()
+            self.export_list_frame.config(text=f"Export-Konfigurationen ({active_count} von {count} aktiv)")
         else:
-            self.export_button.config(text="Exporte konfigurieren...")
-            # Zeige Hinweis wenn keine Exporte
-            if hasattr(self, 'no_export_info'):
-                self.no_export_info.pack(pady=(20, 0))
+            self.export_list_frame.config(text="Export-Konfigurationen")
     
     def _browse_input(self):
         """Öffnet Dialog zur Auswahl des Input-Ordners"""
@@ -535,21 +797,6 @@ class HotfolderDialog:
             self.xml_field_mappings = result
             self._update_button_texts()
     
-    def _configure_exports(self):
-        """Öffnet Dialog zur Konfiguration der Exporte"""
-        dialog = ExportDialog(
-            self.dialog, 
-            self.export_configs, 
-            self.error_path,
-            self.xml_field_mappings
-        )
-        result = dialog.show()
-        
-        if result is not None:
-            self.export_configs = result['export_configs']
-            self.error_path = result['error_path']
-            self._update_button_texts()
-    
     def _validate(self) -> bool:
         """Validiert die Eingaben"""
         # Name prüfen
@@ -594,7 +841,7 @@ class HotfolderDialog:
             "output_filename_expression": "<FileName>",  # Default für Legacy
             "ocr_zones": self.ocr_zones,
             "export_configs": self.export_configs,
-            "error_path": self.error_path
+            "error_path": self.error_path_var.get().strip()
         }
         
         self.dialog.destroy()

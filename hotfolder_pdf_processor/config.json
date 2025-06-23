@@ -1,0 +1,99 @@
+{
+  "hotfolders": [
+    {
+      "id": "55f68f60-ca9a-45e5-9719-109493660085",
+      "name": "Test Hotfolder",
+      "input_path": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Input",
+      "output_path": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Output",
+      "enabled": true,
+      "process_pairs": true,
+      "actions": [
+        "ocr",
+        "pdf_a"
+      ],
+      "action_params": {},
+      "file_patterns": [
+        "*.pdf"
+      ],
+      "xml_field_mappings": [
+        {
+          "field_name": "Projektname",
+          "description": "",
+          "source_type": "expression",
+          "expression": "<Nummer>",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Test",
+          "description": "Die ist ein Test",
+          "source_type": "expression",
+          "expression": "LEFT(\"<Projektname>\",3)",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Blabla",
+          "description": "",
+          "source_type": "expression",
+          "expression": "RIGHT(\"<Test>\",2)",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Adresse",
+          "description": "",
+          "source_type": "expression",
+          "expression": "LEFT(\"<Adresse>\",10)",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Datum",
+          "description": "",
+          "source_type": "expression",
+          "expression": "FORMATDATE(\"d.m.yy hh:ss\")",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Counter",
+          "description": "",
+          "source_type": "expression",
+          "expression": "AUTOINCREMENT(\"Counter1\",1,10)",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        }
+      ],
+      "output_filename_expression": "<Test>_<DateTime>",
+      "ocr_zones": [
+        {
+          "name": "Nummer",
+          "zone": [
+            1904,
+            748,
+            314,
+            228
+          ],
+          "page_num": 1
+        },
+        {
+          "name": "Adresse",
+          "zone": [
+            196,
+            724,
+            720,
+            272
+          ],
+          "page_num": 1
+        }
+      ]
+    }
+  ]
+}

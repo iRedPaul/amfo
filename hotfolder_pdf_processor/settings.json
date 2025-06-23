@@ -1,9 +1,0 @@
-{
-  "default_error_path": "",
-  "smtp_server": "smtp.ionos.de",
-  "smtp_port": 465,
-  "smtp_use_tls": true,
-  "smtp_username": "scanner@info-buero-org.de",
-  "smtp_password": "SCANinfo#07",
-  "smtp_from_address": "scanner@info-buero-org.de"
-}

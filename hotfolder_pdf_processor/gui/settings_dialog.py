@@ -11,6 +11,7 @@ import json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.export_config import ExportSettings, AuthMethod
+from gui.oauth2_setup_dialog import OAuth2SetupDialog
 
 
 class SettingsDialog:
@@ -190,6 +191,11 @@ class SettingsDialog:
         self.oauth2_status_label = ttk.Label(self.oauth2_frame, text="Status: Nicht konfiguriert", 
                                            foreground="red")
         
+        # OAuth2-Info
+        self.oauth2_info_frame = ttk.Frame(self.oauth2_frame)
+        self.oauth2_email_label = ttk.Label(self.oauth2_info_frame, text="E-Mail: -")
+        self.oauth2_client_label = ttk.Label(self.oauth2_info_frame, text="Client-ID: -")
+        
         # Absender
         self.smtp_sender_frame = ttk.LabelFrame(self.email_frame, text="Absender", padding="10")
         
@@ -215,14 +221,17 @@ class SettingsDialog:
                                         state="readonly", width=30)
         self.preset_combo['values'] = [
             "-- Auswählen --",
-            "Gmail",
-            "Outlook.com",
+            "Gmail (OAuth2)",
+            "Gmail (App-Passwort)",
+            "Outlook.com (OAuth2)",
+            "Outlook.com (Standard)",
             "Yahoo Mail",
             "GMX",
             "Web.de",
             "1&1 / IONOS",
             "T-Online",
-            "Office 365",
+            "Office 365 (OAuth2)",
+            "Office 365 (Standard)",
             "Eigener Server"
         ]
         self.preset_combo.set("-- Auswählen --")
@@ -311,14 +320,35 @@ class SettingsDialog:
         
         # OAuth2
         self.auth_method_var.set(self.settings.smtp_auth_method.value)
-        self.oauth2_provider_var.set(self.settings.oauth2_provider)
+        self.oauth2_provider_var.set(self.settings.oauth2_provider.capitalize() if self.settings.oauth2_provider else "Gmail")
         
         # Update OAuth2 Status
-        if self.settings.oauth2_refresh_token:
-            self.oauth2_status_label.config(text="Status: Konfiguriert", foreground="green")
+        self._update_oauth2_status()
         
         # Update UI basierend auf Auth-Methode
         self._on_auth_method_changed()
+    
+    def _update_oauth2_status(self):
+        """Aktualisiert den OAuth2-Status in der UI"""
+        if self.settings.oauth2_refresh_token:
+            self.oauth2_status_label.config(text="Status: Konfiguriert ✓", foreground="green")
+            
+            # Zeige Info
+            if self.settings.smtp_from_address:
+                self.oauth2_email_label.config(text=f"E-Mail: {self.settings.smtp_from_address}")
+            
+            if self.settings.oauth2_client_id:
+                # Zeige nur die ersten und letzten Zeichen der Client-ID
+                client_id = self.settings.oauth2_client_id
+                if len(client_id) > 20:
+                    display_id = f"{client_id[:8]}...{client_id[-8:]}"
+                else:
+                    display_id = client_id
+                self.oauth2_client_label.config(text=f"Client-ID: {display_id}")
+        else:
+            self.oauth2_status_label.config(text="Status: Nicht konfiguriert", foreground="red")
+            self.oauth2_email_label.config(text="E-Mail: -")
+            self.oauth2_client_label.config(text="Client-ID: -")
     
     def _browse_error_path(self):
         """Öffnet Dialog zur Auswahl des Fehler-Pfads"""
@@ -342,7 +372,12 @@ class SettingsDialog:
             self.oauth2_provider_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
             self.oauth2_provider_combo.grid(row=0, column=1, sticky=tk.W)
             self.oauth2_setup_button.grid(row=1, column=0, columnspan=2, pady=(10, 5))
-            self.oauth2_status_label.grid(row=2, column=0, columnspan=2)
+            self.oauth2_status_label.grid(row=2, column=0, columnspan=2, pady=(5, 10))
+            
+            self.oauth2_info_frame.grid(row=3, column=0, columnspan=2, sticky="w")
+            self.oauth2_email_label.pack(anchor=tk.W)
+            self.oauth2_client_label.pack(anchor=tk.W, pady=(2, 0))
+            
             self.oauth2_frame.columnconfigure(1, weight=1)
     
     def _on_ssl_changed(self):
@@ -368,54 +403,87 @@ class SettingsDialog:
         preset = self.preset_var.get()
         
         presets = {
-            "Gmail": {
+            "Gmail (OAuth2)": {
                 "server": "smtp.gmail.com",
                 "port": 587,
                 "ssl": False,
                 "tls": True,
-                "note": "Hinweis: Für Gmail benötigen Sie ein App-spezifisches Passwort oder OAuth2!"
+                "auth": "oauth2",
+                "provider": "Gmail",
+                "note": "Für Gmail mit OAuth2 müssen Sie die Gmail API in der Google Cloud Console aktivieren."
             },
-            "Outlook.com": {
+            "Gmail (App-Passwort)": {
+                "server": "smtp.gmail.com",
+                "port": 587,
+                "ssl": False,
+                "tls": True,
+                "auth": "basic",
+                "note": "Für Gmail benötigen Sie ein App-spezifisches Passwort! Aktivieren Sie 2FA und erstellen Sie ein App-Passwort."
+            },
+            "Outlook.com (OAuth2)": {
                 "server": "smtp-mail.outlook.com",
                 "port": 587,
                 "ssl": False,
-                "tls": True
+                "tls": True,
+                "auth": "oauth2",
+                "provider": "Outlook"
+            },
+            "Outlook.com (Standard)": {
+                "server": "smtp-mail.outlook.com",
+                "port": 587,
+                "ssl": False,
+                "tls": True,
+                "auth": "basic"
             },
             "Yahoo Mail": {
                 "server": "smtp.mail.yahoo.com",
                 "port": 587,
                 "ssl": False,
-                "tls": True
+                "tls": True,
+                "auth": "basic"
             },
             "GMX": {
                 "server": "mail.gmx.net",
                 "port": 587,
                 "ssl": False,
-                "tls": True
+                "tls": True,
+                "auth": "basic"
             },
             "Web.de": {
                 "server": "smtp.web.de",
                 "port": 587,
                 "ssl": False,
-                "tls": True
+                "tls": True,
+                "auth": "basic"
             },
             "1&1 / IONOS": {
-                "server": "smtp.1und1.de",
-                "port": 587,
-                "ssl": False,
-                "tls": True
+                "server": "smtp.ionos.de",
+                "port": 465,
+                "ssl": True,
+                "tls": False,
+                "auth": "basic"
             },
             "T-Online": {
                 "server": "securesmtp.t-online.de",
                 "port": 465,
                 "ssl": True,
-                "tls": False
+                "tls": False,
+                "auth": "basic"
             },
-            "Office 365": {
+            "Office 365 (OAuth2)": {
                 "server": "smtp.office365.com",
                 "port": 587,
                 "ssl": False,
-                "tls": True
+                "tls": True,
+                "auth": "oauth2",
+                "provider": "Office365"
+            },
+            "Office 365 (Standard)": {
+                "server": "smtp.office365.com",
+                "port": 587,
+                "ssl": False,
+                "tls": True,
+                "auth": "basic"
             }
         }
         
@@ -426,14 +494,56 @@ class SettingsDialog:
             self.smtp_ssl_var.set(config["ssl"])
             self.smtp_tls_var.set(config["tls"])
             
+            # Setze Auth-Methode
+            if config.get("auth") == "oauth2":
+                self.auth_method_var.set(AuthMethod.OAUTH2.value)
+                self.oauth2_provider_var.set(config.get("provider", "Gmail"))
+            else:
+                self.auth_method_var.set(AuthMethod.BASIC.value)
+            
+            # Update UI
+            self._on_auth_method_changed()
+            
             if "note" in config:
                 messagebox.showinfo("Hinweis", config["note"])
     
     def _setup_oauth2(self):
         """Öffnet OAuth2-Setup-Dialog"""
-        messagebox.showinfo("OAuth2-Setup", 
-            "OAuth2-Einrichtung ist in dieser Version noch nicht implementiert.\n\n"
-            "Bitte verwenden Sie vorerst die Standard-Authentifizierung mit einem App-Passwort.")
+        provider = self.oauth2_provider_var.get()
+        if not provider:
+            messagebox.showerror("Fehler", "Bitte wählen Sie einen OAuth2-Anbieter aus.")
+            return
+        
+        # Sammle aktuelle OAuth2-Settings
+        current_oauth2_settings = {
+            'oauth2_provider': self.settings.oauth2_provider,
+            'oauth2_client_id': self.settings.oauth2_client_id,
+            'oauth2_client_secret': self.settings.oauth2_client_secret,
+            'oauth2_refresh_token': self.settings.oauth2_refresh_token,
+            'oauth2_access_token': self.settings.oauth2_access_token,
+            'oauth2_token_expiry': self.settings.oauth2_token_expiry,
+            'smtp_from_address': self.smtp_from_var.get() or self.settings.smtp_from_address,
+            'smtp_username': self.smtp_username_var.get() or self.settings.smtp_username
+        }
+        
+        dialog = OAuth2SetupDialog(self.dialog, provider, current_oauth2_settings)
+        result = dialog.show()
+        
+        if result:
+            # Update Settings mit OAuth2-Config
+            self.settings.oauth2_provider = result['oauth2_provider']
+            self.settings.oauth2_client_id = result['oauth2_client_id']
+            self.settings.oauth2_client_secret = result['oauth2_client_secret']
+            self.settings.oauth2_refresh_token = result['oauth2_refresh_token']
+            self.settings.oauth2_access_token = result['oauth2_access_token']
+            self.settings.oauth2_token_expiry = result['oauth2_token_expiry']
+            
+            # Update E-Mail-Adresse
+            if result['smtp_from_address']:
+                self.smtp_from_var.set(result['smtp_from_address'])
+            
+            # Update Status
+            self._update_oauth2_status()
     
     def _test_email(self):
         """Testet die E-Mail-Einstellungen"""
@@ -444,8 +554,20 @@ class SettingsDialog:
                 "Bitte füllen Sie mindestens Server, Port und Absender-Adresse aus.")
             return
         
+        # Prüfe Auth-spezifische Felder
+        if self.auth_method_var.get() == AuthMethod.BASIC.value:
+            if not self.smtp_username_var.get() or not self.smtp_password_var.get():
+                messagebox.showerror("Fehler", 
+                    "Für Standard-Authentifizierung müssen Benutzername und Passwort ausgefüllt sein.")
+                return
+        else:  # OAuth2
+            if not self.settings.oauth2_refresh_token:
+                messagebox.showerror("Fehler", 
+                    "Bitte richten Sie zuerst OAuth2 ein.")
+                return
+        
         # Test-Dialog
-        dialog = EmailTestDialog(self.dialog, {
+        config = {
             'server': self.smtp_server_var.get(),
             'port': self.smtp_port_var.get(),
             'use_ssl': self.smtp_ssl_var.get(),
@@ -454,7 +576,20 @@ class SettingsDialog:
             'password': self.smtp_password_var.get(),
             'from_address': self.smtp_from_var.get(),
             'auth_method': self.auth_method_var.get()
-        })
+        }
+        
+        # Füge OAuth2-Config hinzu wenn OAuth2
+        if self.auth_method_var.get() == AuthMethod.OAUTH2.value:
+            config.update({
+                'oauth2_provider': self.settings.oauth2_provider,
+                'oauth2_access_token': self.settings.oauth2_access_token,
+                'oauth2_refresh_token': self.settings.oauth2_refresh_token,
+                'oauth2_token_expiry': self.settings.oauth2_token_expiry,
+                'oauth2_client_id': self.settings.oauth2_client_id,
+                'oauth2_client_secret': self.settings.oauth2_client_secret
+            })
+        
+        dialog = EmailTestDialog(self.dialog, config)
         dialog.show()
     
     def _validate(self) -> bool:
@@ -492,9 +627,12 @@ class SettingsDialog:
         self.settings.smtp_password = self.smtp_password_var.get()
         self.settings.smtp_from_address = self.smtp_from_var.get()
         
-        # OAuth2
+        # Auth-Methode
         self.settings.smtp_auth_method = AuthMethod(self.auth_method_var.get())
-        self.settings.oauth2_provider = self.oauth2_provider_var.get()
+        
+        # OAuth2-Provider nur updaten wenn OAuth2 ausgewählt
+        if self.auth_method_var.get() == AuthMethod.OAUTH2.value:
+            self.settings.oauth2_provider = self.oauth2_provider_var.get().lower()
         
         # Speichere in Datei
         self._save_settings()
@@ -611,30 +749,68 @@ class EmailTestDialog:
             from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
             
+            # OAuth2-Unterstützung
+            if self.smtp_config.get('auth_method') == 'oauth2':
+                # OAuth2-Authentifizierung
+                from core.oauth2_manager import OAuth2Manager, get_token_storage
+                
+                provider = self.smtp_config.get('oauth2_provider', 'gmail')
+                oauth2_manager = OAuth2Manager(provider)
+                token_storage = get_token_storage()
+                
+                # Hole gespeicherte Tokens
+                tokens = token_storage.get_tokens(provider, self.smtp_config['from_address'])
+                if not tokens:
+                    tokens = {
+                        'access_token': self.smtp_config.get('oauth2_access_token', ''),
+                        'refresh_token': self.smtp_config.get('oauth2_refresh_token', ''),
+                        'token_expiry': self.smtp_config.get('oauth2_token_expiry', '')
+                    }
+                
+                # Prüfe ob Token erneuert werden muss
+                if oauth2_manager.is_token_expired(tokens.get('token_expiry', '')):
+                    # Token erneuern
+                    oauth2_manager.set_client_credentials(
+                        self.smtp_config.get('oauth2_client_id', ''),
+                        self.smtp_config.get('oauth2_client_secret', '')
+                    )
+                    
+                    success, new_tokens = oauth2_manager.refresh_access_token(
+                        tokens.get('refresh_token', '')
+                    )
+                    
+                    if success:
+                        tokens = new_tokens
+                        # Speichere neue Tokens
+                        token_storage.set_tokens(provider, self.smtp_config['from_address'], tokens)
+                    else:
+                        raise Exception(f"Token-Erneuerung fehlgeschlagen: {new_tokens.get('error', 'Unbekannter Fehler')}")
+                
+                access_token = tokens.get('access_token', '')
+                if not access_token:
+                    raise Exception("Kein gültiger Access Token vorhanden")
+            
             # Erstelle Nachricht
             msg = MIMEMultipart()
             msg['From'] = self.smtp_config['from_address']
             msg['To'] = recipient
             msg['Subject'] = "Hotfolder PDF Processor - Test-E-Mail"
             
-            body = """Dies ist eine Test-E-Mail vom Hotfolder PDF Processor.
+            auth_method = "OAuth2" if self.smtp_config.get('auth_method') == 'oauth2' else "Standard"
+            
+            body = f"""Dies ist eine Test-E-Mail vom Hotfolder PDF Processor.
 
 Wenn Sie diese Nachricht erhalten, sind Ihre E-Mail-Einstellungen korrekt konfiguriert!
 
-Server: {}
-Port: {}
-SSL: {}
-TLS: {}
-Absender: {}
+Server: {self.smtp_config['server']}
+Port: {self.smtp_config['port']}
+SSL: {"Ja" if self.smtp_config['use_ssl'] else "Nein"}
+TLS: {"Ja" if self.smtp_config['use_tls'] else "Nein"}
+Authentifizierung: {auth_method}
+Absender: {self.smtp_config['from_address']}
 
 Mit freundlichen Grüßen
-Hotfolder PDF Processor""".format(
-                self.smtp_config['server'],
-                self.smtp_config['port'],
-                "Ja" if self.smtp_config['use_ssl'] else "Nein",
-                "Ja" if self.smtp_config['use_tls'] else "Nein",
-                self.smtp_config['from_address']
-            )
+Hotfolder PDF Processor"""
             
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
             
@@ -651,9 +827,18 @@ Hotfolder PDF Processor""".format(
                 if self.smtp_config['use_tls']:
                     server.starttls()
             
-            # Anmelden wenn Credentials vorhanden
-            if self.smtp_config['username'] and self.smtp_config['password']:
-                server.login(self.smtp_config['username'], self.smtp_config['password'])
+            # Anmeldung
+            if self.smtp_config.get('auth_method') == 'oauth2':
+                # OAuth2-Anmeldung
+                auth_string = oauth2_manager.create_oauth2_sasl_string(
+                    self.smtp_config['from_address'],
+                    access_token
+                )
+                server.docmd('AUTH', 'XOAUTH2 ' + auth_string)
+            else:
+                # Standard-Anmeldung
+                if self.smtp_config['username'] and self.smtp_config['password']:
+                    server.login(self.smtp_config['username'], self.smtp_config['password'])
             
             # Sende E-Mail
             server.send_message(msg)

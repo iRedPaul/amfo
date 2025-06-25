@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 import subprocess
 import tempfile
 import uuid
+import logging
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -23,6 +24,9 @@ from models.hotfolder_config import ProcessingAction, DocumentPair, HotfolderCon
 from core.xml_field_processor import XMLFieldProcessor, FieldMapping
 from core.ocr_processor import OCRProcessor
 from core.export_processor import ExportProcessor
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class PDFProcessor:
@@ -90,7 +94,7 @@ class PDFProcessor:
                     
                     success = self.supported_actions[action](pdf_to_process, params)
                     if not success:
-                        print(f"Aktion {action.value} fehlgeschlagen für {os.path.basename(doc_pair.pdf_path)}")
+                        logger.error(f"Aktion {action.value} fehlgeschlagen für {os.path.basename(doc_pair.pdf_path)}")
                         raise Exception(f"Aktion {action.value} fehlgeschlagen")
             
             # Führe Exporte durch wenn konfiguriert
@@ -114,7 +118,7 @@ class PDFProcessor:
                 if not all_successful:
                     # Mindestens ein Export fehlgeschlagen
                     failed_exports = [msg for success, msg in export_results if not success]
-                    print(f"Export-Fehler: {', '.join(failed_exports)}")
+                    logger.error(f"Export-Fehler: {', '.join(failed_exports)}")
                     
                     # Wenn alle Exporte fehlschlagen, behandle als Fehler
                     if not any(success for success, _ in export_results):
@@ -176,11 +180,11 @@ class PDFProcessor:
             self._ocr_cache.clear()
             self._zone_cache.clear()
             
-            print(f"Erfolgreich verarbeitet: {temp_doc_pair.base_name}")
+            logger.info(f"Erfolgreich verarbeitet: {temp_doc_pair.base_name}")
             return True
             
         except Exception as e:
-            print(f"Fehler bei der Verarbeitung von {os.path.basename(doc_pair.pdf_path)}: {e}")
+            logger.error(f"Fehler bei der Verarbeitung von {os.path.basename(doc_pair.pdf_path)}: {e}")
             
             # Bestimme Fehlerpfad
             error_path = self._get_error_path(doc_pair, hotfolder)
@@ -207,10 +211,10 @@ class PDFProcessor:
                         error_xml = f"{base}_{timestamp}{ext}"
                     shutil.move(temp_xml_path, error_xml)
                     
-                print(f"Dateien in Fehlerpfad verschoben: {error_path}")
+                logger.info(f"Dateien in Fehlerpfad verschoben: {error_path}")
                 
             except Exception as move_error:
-                print(f"Fehler beim Verschieben in Fehlerpfad: {move_error}")
+                logger.error(f"Fehler beim Verschieben in Fehlerpfad: {move_error}")
                 # Als letzter Ausweg: Verschiebe zurück zum Input
                 try:
                     if os.path.exists(temp_pdf_path):
@@ -227,7 +231,7 @@ class PDFProcessor:
                 if os.path.exists(work_dir):
                     shutil.rmtree(work_dir)
             except Exception as cleanup_error:
-                print(f"Fehler beim Aufräumen des temporären Ordners: {cleanup_error}")
+                logger.error(f"Fehler beim Aufräumen des temporären Ordners: {cleanup_error}")
     
     def _get_error_path(self, doc_pair: DocumentPair, hotfolder: HotfolderConfig) -> str:
         """Bestimmt den Fehlerpfad für fehlgeschlagene Verarbeitungen"""
@@ -322,7 +326,7 @@ class PDFProcessor:
                 self._update_metadata(pdf_path, {"xml_metadata": metadata})
                 
         except Exception as e:
-            print(f"Fehler beim Verarbeiten der XML-Datei: {e}")
+            logger.error(f"Fehler beim Verarbeiten der XML-Datei: {e}")
     
     def _update_metadata(self, pdf_path: str, metadata: Dict[str, Any]) -> None:
         """Aktualisiert PDF-Metadaten"""
@@ -346,7 +350,7 @@ class PDFProcessor:
             shutil.move(temp_path, pdf_path)
             
         except Exception as e:
-            print(f"Fehler beim Aktualisieren der Metadaten: {e}")
+            logger.error(f"Fehler beim Aktualisieren der Metadaten: {e}")
     
     # PDF-Verarbeitungsfunktionen
     def _compress_pdf(self, pdf_path: str, params: Dict[str, Any]) -> bool:
@@ -355,23 +359,18 @@ class PDFProcessor:
             # Prüfe ob Ghostscript verfügbar ist
             if not self._is_ghostscript_available():
                 error_msg = (
-                    "\n"
-                    "========================================\n"
                     "FEHLER: Ghostscript nicht gefunden!\n"
-                    "========================================\n"
                     "Die PDF-Komprimierung benötigt Ghostscript.\n"
-                    "\n"
                     "Bitte installieren Sie Ghostscript:\n"
                     "Windows: https://www.ghostscript.com/download/gsdnld.html\n"
                     "Linux: sudo apt-get install ghostscript\n"
-                    "Mac: brew install ghostscript\n"
-                    "========================================\n"
+                    "Mac: brew install ghostscript"
                 )
-                print(error_msg)
+                logger.error(error_msg)
                 return False
             
             original_size = os.path.getsize(pdf_path)
-            print(f"Starte Komprimierung (Original: {original_size / 1024 / 1024:.2f} MB)")
+            logger.info(f"Starte Komprimierung (Original: {original_size / 1024 / 1024:.2f} MB)")
             
             # Verwende Ghostscript für Komprimierung
             success = self._compress_with_ghostscript(pdf_path, params)
@@ -379,14 +378,14 @@ class PDFProcessor:
             if success:
                 compressed_size = os.path.getsize(pdf_path)
                 reduction_percent = (1 - compressed_size/original_size) * 100
-                print(f"PDF komprimiert: {original_size / 1024 / 1024:.2f} MB -> {compressed_size / 1024 / 1024:.2f} MB ({reduction_percent:.1f}% Reduktion)")
+                logger.info(f"PDF komprimiert: {original_size / 1024 / 1024:.2f} MB -> {compressed_size / 1024 / 1024:.2f} MB ({reduction_percent:.1f}% Reduktion)")
                 return True
             else:
-                print("Komprimierung fehlgeschlagen")
+                logger.error("Komprimierung fehlgeschlagen")
                 return False
             
         except Exception as e:
-            print(f"Fehler bei der Komprimierung: {e}")
+            logger.error(f"Fehler bei der Komprimierung: {e}")
             return False
     
     def _is_ghostscript_available(self) -> bool:
@@ -540,7 +539,7 @@ class PDFProcessor:
             elif mono_compression == 'jbig2':
                 # JBIG2 ist nicht in allen Ghostscript-Versionen verfügbar
                 # Fallback zu CCITT wenn JBIG2 fehlschlägt
-                print("Hinweis: JBIG2 wird versucht, Fallback zu CCITT falls nicht verfügbar")
+                logger.info("Hinweis: JBIG2 wird versucht, Fallback zu CCITT falls nicht verfügbar")
                 cmd.extend([
                     '-dMonoImageFilter=/CCITTFaxEncode'  # Sicherer Fallback
                 ])
@@ -583,18 +582,18 @@ class PDFProcessor:
             cmd.append(pdf_path)
             
             # Debug-Ausgabe
-            print(f"Komprimierungseinstellungen:")
-            print(f"  - Farbbilder: {color_dpi} DPI, {color_compression}")
-            print(f"  - Graustufen: {gray_dpi} DPI, {gray_compression}")
-            print(f"  - S/W-Bilder: {mono_dpi} DPI, {mono_compression}")
+            logger.info(f"Komprimierungseinstellungen:")
+            logger.info(f"  - Farbbilder: {color_dpi} DPI, {color_compression}")
+            logger.info(f"  - Graustufen: {gray_dpi} DPI, {gray_compression}")
+            logger.info(f"  - S/W-Bilder: {mono_dpi} DPI, {mono_compression}")
             if color_compression == 'jpeg' or gray_compression == 'jpeg':
-                print(f"  - JPEG-Qualität: {jpeg_quality}%")
+                logger.info(f"  - JPEG-Qualität: {jpeg_quality}%")
             
             # Führe Ghostscript aus
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
-                print(f"Ghostscript-Fehler: {result.stderr}")
+                logger.error(f"Ghostscript-Fehler: {result.stderr}")
                 return False
             
             if os.path.exists(temp_output):
@@ -605,13 +604,13 @@ class PDFProcessor:
                     return True
                 else:
                     os.remove(temp_output)
-                    print("Ghostscript erzeugte eine leere Datei")
+                    logger.error("Ghostscript erzeugte eine leere Datei")
                     return False
             
             return False
             
         except Exception as e:
-            print(f"Fehler bei Ghostscript-Komprimierung: {e}")
+            logger.error(f"Fehler bei Ghostscript-Komprimierung: {e}")
             return False
     
     def _split_pdf(self, pdf_path: str, params: Dict[str, Any]) -> bool:
@@ -635,11 +634,11 @@ class PDFProcessor:
                 with open(output_file, 'wb') as f:
                     writer.write(f)
             
-            print(f"PDF aufgeteilt in {len(reader.pages)} Seiten: {split_dir}")
+            logger.info(f"PDF aufgeteilt in {len(reader.pages)} Seiten: {split_dir}")
             return True
             
         except Exception as e:
-            print(f"Fehler beim Aufteilen: {e}")
+            logger.error(f"Fehler beim Aufteilen: {e}")
             return False
     
     def _perform_ocr(self, pdf_path: str, params: Dict[str, Any]) -> bool:
@@ -651,7 +650,7 @@ class PDFProcessor:
             try:
                 import ocrmypdf
                 
-                print(f"Führe OCR aus mit ocrmypdf...")
+                logger.info(f"Führe OCR aus mit ocrmypdf...")
                 ocrmypdf.ocr(
                     pdf_path,
                     pdf_path,
@@ -659,19 +658,19 @@ class PDFProcessor:
                     force_ocr=True,
                     optimize=1
                 )
-                print(f"OCR erfolgreich durchgeführt")
+                logger.info(f"OCR erfolgreich durchgeführt")
                 return True
                 
             except ImportError:
                 # Fallback: Tesseract direkt verwenden
-                print("ocrmypdf nicht installiert, verwende Tesseract direkt...")
+                logger.info("ocrmypdf nicht installiert, verwende Tesseract direkt...")
                 
                 # Prüfe ob Tesseract verfügbar ist
                 try:
                     subprocess.run(["tesseract", "--version"], 
                                  capture_output=True, check=True)
                 except:
-                    print("Tesseract nicht gefunden! Bitte installieren Sie Tesseract OCR.")
+                    logger.error("Tesseract nicht gefunden! Bitte installieren Sie Tesseract OCR.")
                     return False
                 
                 # Konvertiere zu durchsuchbarer PDF mit Tesseract
@@ -690,14 +689,14 @@ class PDFProcessor:
                 
                 if result.returncode == 0 and os.path.exists(temp_out_path):
                     shutil.move(temp_out_path, pdf_path)
-                    print("OCR erfolgreich durchgeführt")
+                    logger.info("OCR erfolgreich durchgeführt")
                     return True
                 else:
-                    print(f"OCR fehlgeschlagen: {result.stderr}")
+                    logger.error(f"OCR fehlgeschlagen: {result.stderr}")
                     return False
                     
         except Exception as e:
-            print(f"Fehler bei OCR: {e}")
+            logger.error(f"Fehler bei OCR: {e}")
             return False
     
     def _convert_to_pdf_a(self, pdf_path: str, params: Dict[str, Any]) -> bool:
@@ -707,7 +706,7 @@ class PDFProcessor:
             try:
                 import ocrmypdf
                 
-                print(f"Konvertiere zu PDF/A...")
+                logger.info(f"Konvertiere zu PDF/A...")
                 ocrmypdf.ocr(
                     pdf_path,
                     pdf_path,
@@ -716,11 +715,11 @@ class PDFProcessor:
                     tesseract_timeout=0,  # Kein OCR, nur PDF/A
                     skip_text=True  # Überspringe Text-Layer
                 )
-                print(f"PDF/A Konvertierung erfolgreich")
+                logger.info(f"PDF/A Konvertierung erfolgreich")
                 return True
                 
             except ImportError:
-                print("ocrmypdf nicht installiert. Für PDF/A Konvertierung bitte installieren: pip install ocrmypdf")
+                logger.info("ocrmypdf nicht installiert. Für PDF/A Konvertierung bitte installieren: pip install ocrmypdf")
                 
                 # Einfacher Fallback: Füge PDF/A Metadaten hinzu
                 try:
@@ -746,15 +745,15 @@ class PDFProcessor:
                         writer.write(output_file)
                     
                     shutil.move(temp_path, pdf_path)
-                    print("Basis PDF/A Metadaten hinzugefügt (für volle Konformität ocrmypdf installieren)")
+                    logger.info("Basis PDF/A Metadaten hinzugefügt (für volle Konformität ocrmypdf installieren)")
                     return True
                     
                 except Exception as e:
-                    print(f"Fehler bei PDF/A Konvertierung: {e}")
+                    logger.error(f"Fehler bei PDF/A Konvertierung: {e}")
                     return False
                     
         except Exception as e:
-            print(f"Fehler bei PDF/A Konvertierung: {e}")
+            logger.error(f"Fehler bei PDF/A Konvertierung: {e}")
             return False
     
     def cleanup_temp_dir(self):
@@ -773,8 +772,8 @@ class PDFProcessor:
                         if dir_age > 86400:  # 24 Stunden
                             try:
                                 shutil.rmtree(dir_path)
-                                print(f"Alter temporärer Ordner gelöscht: {work_dir}")
+                                logger.info(f"Alter temporärer Ordner gelöscht: {work_dir}")
                             except Exception as e:
-                                print(f"Fehler beim Löschen von {work_dir}: {e}")
+                                logger.error(f"Fehler beim Löschen von {work_dir}: {e}")
         except Exception as e:
-            print(f"Fehler beim Aufräumen des temporären Verzeichnisses: {e}")
+            logger.error(f"Fehler beim Aufräumen des temporären Verzeichnisses: {e}")

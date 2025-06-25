@@ -7,12 +7,16 @@ import uuid
 from typing import List, Optional, Dict
 import sys
 import os
+import logging
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config_manager import ConfigManager
 from core.file_watcher import FileWatcher
 from models.hotfolder_config import HotfolderConfig
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class HotfolderManager:
@@ -50,7 +54,7 @@ class HotfolderManager:
             self._rescan_thread = threading.Thread(target=self._rescan_loop, daemon=True)
             self._rescan_thread.start()
             
-            print("Hotfolder-Manager gestartet")
+            logger.info("Hotfolder-Manager gestartet")
     
     def stop(self):
         """Stoppt den Hotfolder-Manager"""
@@ -67,7 +71,7 @@ class HotfolderManager:
             if self._rescan_thread:
                 self._rescan_thread.join(timeout=5)
             
-            print("Hotfolder-Manager gestoppt")
+            logger.info("Hotfolder-Manager gestoppt")
     
     def _monitor_loop(self):
         """Hauptschleife für die Dateiverarbeitung"""
@@ -80,7 +84,7 @@ class HotfolderManager:
                 time.sleep(0.5)
                 
             except Exception as e:
-                print(f"Fehler im Monitor-Loop: {e}")
+                logger.error(f"Fehler im Monitor-Loop: {e}")
                 time.sleep(1)
     
     def _rescan_loop(self):
@@ -91,22 +95,22 @@ class HotfolderManager:
                 
                 # Warte bis zum nächsten Rescan
                 if current_time - self._last_rescan >= self._rescan_interval:
-                    print(f"Führe periodischen Rescan durch (alle {self._rescan_interval} Sekunden)...")
+                    logger.info(f"Führe periodischen Rescan durch (alle {self._rescan_interval} Sekunden)...")
                     
                     # Rescan für alle aktivierten Hotfolder
                     for hotfolder in self.config_manager.get_enabled_hotfolders():
                         if hotfolder.id in self.file_watcher.handlers:
-                            print(f"Rescanne Hotfolder: {hotfolder.name}")
+                            logger.debug(f"Rescanne Hotfolder: {hotfolder.name}")
                             self.file_watcher.rescan_hotfolder(hotfolder)
                     
                     self._last_rescan = current_time
-                    print("Periodischer Rescan abgeschlossen")
+                    logger.debug("Periodischer Rescan abgeschlossen")
                 
                 # Schlafe für 10 Sekunden (prüfe alle 10 Sekunden ob Rescan nötig)
                 time.sleep(10)
                 
             except Exception as e:
-                print(f"Fehler im Rescan-Loop: {e}")
+                logger.error(f"Fehler im Rescan-Loop: {e}")
                 time.sleep(60)  # Bei Fehler länger warten
     
     def create_hotfolder(self, name: str, input_path: str, output_path: str,
@@ -176,6 +180,7 @@ class HotfolderManager:
             return True, hotfolder_id
             
         except Exception as e:
+            logger.exception("Fehler beim Erstellen des Hotfolders")
             return False, f"Fehler beim Erstellen des Hotfolders: {e}"
     
     def update_hotfolder(self, hotfolder_id: str, **kwargs) -> tuple[bool, str]:
@@ -246,6 +251,7 @@ class HotfolderManager:
             return True, "Hotfolder aktualisiert"
             
         except Exception as e:
+            logger.exception("Fehler beim Aktualisieren")
             return False, f"Fehler beim Aktualisieren: {e}"
     
     def delete_hotfolder(self, hotfolder_id: str) -> tuple[bool, str]:
@@ -261,6 +267,7 @@ class HotfolderManager:
             return True, "Hotfolder gelöscht"
             
         except Exception as e:
+            logger.exception("Fehler beim Löschen")
             return False, f"Fehler beim Löschen: {e}"
     
     def toggle_hotfolder(self, hotfolder_id: str, enabled: bool) -> tuple[bool, str]:
@@ -277,6 +284,7 @@ class HotfolderManager:
                 return False, message
                 
         except Exception as e:
+            logger.exception("Fehler beim Umschalten")
             return False, f"Fehler beim Umschalten: {e}"
     
     def get_hotfolders(self) -> List[HotfolderConfig]:
@@ -291,4 +299,4 @@ class HotfolderManager:
         """Setzt das Rescan-Intervall in Sekunden"""
         if seconds >= 60:  # Mindestens 1 Minute
             self._rescan_interval = seconds
-            print(f"Rescan-Intervall geändert auf {seconds} Sekunden")
+            logger.info(f"Rescan-Intervall geändert auf {seconds} Sekunden")

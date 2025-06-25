@@ -39,10 +39,13 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
         self.cleanup_old_logs(30)
     
     def cleanup_old_logs(self, days_to_keep=30):
-        """Löscht alte Log-Dateien"""
+        """Löscht alte Log-Dateien mit robuster Fehlerbehandlung"""
         try:
             cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+            deleted_count = 0
+            error_count = 0
             
+            # Korrigiertes glob-Pattern
             for log_file in self.log_dir.glob("hotfolder_*.log"):
                 # Extrahiere Datum aus Dateiname
                 try:
@@ -50,15 +53,29 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
                     file_date = datetime.strptime(date_str, "%Y-%m-%d")
                     
                     if file_date < cutoff_date:
-                        log_file.unlink()
-                        logging.info(f"Alte Log-Datei gelöscht: {log_file.name}")
-                        
+                        try:
+                            log_file.unlink()
+                            deleted_count += 1
+                            logging.info(f"Alte Log-Datei gelöscht: {log_file.name}")
+                        except PermissionError:
+                            error_count += 1
+                            logging.warning(f"Keine Berechtigung zum Löschen von: {log_file.name}")
+                        except Exception as e:
+                            error_count += 1
+                            logging.error(f"Fehler beim Löschen von {log_file.name}: {e}")
+                            
                 except ValueError:
                     # Ignoriere Dateien mit ungültigem Datumformat
-                    pass
+                    logging.debug(f"Überspringe Datei mit ungültigem Datumformat: {log_file.name}")
+                    
+            # Log zusammenfassende Information
+            if deleted_count > 0:
+                logging.info(f"Log-Cleanup abgeschlossen: {deleted_count} Dateien gelöscht")
+            if error_count > 0:
+                logging.warning(f"Log-Cleanup: {error_count} Dateien konnten nicht gelöscht werden")
                     
         except Exception as e:
-            logging.error(f"Fehler beim Aufräumen alter Logs: {e}")
+            logging.error(f"Kritischer Fehler beim Aufräumen alter Logs: {e}", exc_info=True)
 
 
 def setup_logging(log_dir=None, log_level=logging.INFO):

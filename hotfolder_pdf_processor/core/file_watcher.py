@@ -3,6 +3,7 @@
 """
 import os
 import time
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 from watchdog.observers import Observer
@@ -13,6 +14,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.hotfolder_config import HotfolderConfig, DocumentPair
 from core.pdf_processor import PDFProcessor
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class HotfolderHandler(FileSystemEventHandler):
@@ -34,7 +38,7 @@ class HotfolderHandler(FileSystemEventHandler):
         
         # Prüfe ob Datei zum Pattern passt
         if self._matches_pattern(file_path):
-            print(f"Neue Datei erkannt: {file_path}")
+            logger.info(f"Neue Datei erkannt: {file_path}")
             # Warte bis Datei vollständig geschrieben ist
             self.pending_files[file_path] = time.time()
             
@@ -89,7 +93,7 @@ class HotfolderHandler(FileSystemEventHandler):
         
         # Prüfe ob Partner in der Warteliste ist
         if partner_path in self.waiting_for_partner:
-            print(f"Partner gefunden! Verarbeite Paar: {os.path.basename(pdf_path)} + {os.path.basename(xml_path)}")
+            logger.info(f"Partner gefunden! Verarbeite Paar: {os.path.basename(pdf_path)} + {os.path.basename(xml_path)}")
             
             # Entferne beide aus allen Listen
             del self.waiting_for_partner[partner_path]
@@ -114,12 +118,12 @@ class HotfolderHandler(FileSystemEventHandler):
             # Verarbeite Dokument
             success = self.processor.process_document(doc_pair, self.config)
             if success:
-                print(f"Dokumentenpaar erfolgreich verarbeitet: {os.path.basename(pdf_path)}")
+                logger.info(f"Dokumentenpaar erfolgreich verarbeitet: {os.path.basename(pdf_path)}")
             else:
-                print(f"Fehler bei der Verarbeitung: {os.path.basename(pdf_path)}")
+                logger.error(f"Fehler bei der Verarbeitung: {os.path.basename(pdf_path)}")
         
         except Exception as e:
-            print(f"Fehler bei der Dateiverarbeitung: {e}")
+            logger.exception(f"Fehler bei der Dateiverarbeitung: {e}")
         finally:
             # Entferne aus processing_files
             if pdf_path in self.processing_files:
@@ -145,12 +149,12 @@ class HotfolderHandler(FileSystemEventHandler):
                 # Verarbeite Dokument
                 success = self.processor.process_document(doc_pair, self.config)
                 if success:
-                    print(f"Datei erfolgreich verarbeitet: {os.path.basename(file_path)}")
+                    logger.info(f"Datei erfolgreich verarbeitet: {os.path.basename(file_path)}")
                 else:
-                    print(f"Fehler bei der Verarbeitung: {os.path.basename(file_path)}")
+                    logger.error(f"Fehler bei der Verarbeitung: {os.path.basename(file_path)}")
             
             except Exception as e:
-                print(f"Fehler bei der Dateiverarbeitung: {e}")
+                logger.exception(f"Fehler bei der Dateiverarbeitung: {e}")
             finally:
                 # Entferne aus processing_files
                 if file_path in self.processing_files:
@@ -174,7 +178,7 @@ class HotfolderHandler(FileSystemEventHandler):
                     return DocumentPair(pdf_path=file_path, xml_path=xml_path)
                 else:
                     # Keine XML gefunden - warte auf Partner (ohne Timeout)
-                    print(f"PDF gefunden, warte auf zugehörige XML: {os.path.basename(file_path)}")
+                    logger.info(f"PDF gefunden, warte auf zugehörige XML: {os.path.basename(file_path)}")
                     self.waiting_for_partner[file_path] = time.time()
                     return None
             else:
@@ -192,7 +196,7 @@ class HotfolderHandler(FileSystemEventHandler):
                 return DocumentPair(pdf_path=pdf_path, xml_path=file_path)
             else:
                 # Keine PDF gefunden - warte auf Partner (ohne Timeout)
-                print(f"XML gefunden, warte auf zugehörige PDF: {os.path.basename(file_path)}")
+                logger.info(f"XML gefunden, warte auf zugehörige PDF: {os.path.basename(file_path)}")
                 self.waiting_for_partner[file_path] = time.time()
                 return None
         
@@ -240,11 +244,11 @@ class FileWatcher:
     def start_watching(self, hotfolder: HotfolderConfig):
         """Startet die Überwachung eines Hotfolders"""
         if hotfolder.id in self.observers:
-            print(f"Hotfolder {hotfolder.name} wird bereits überwacht")
+            logger.warning(f"Hotfolder {hotfolder.name} wird bereits überwacht")
             return
         
         if not os.path.exists(hotfolder.input_path):
-            print(f"Input-Pfad existiert nicht: {hotfolder.input_path}")
+            logger.error(f"Input-Pfad existiert nicht: {hotfolder.input_path}")
             return
         
         # Erstelle Handler und Observer
@@ -259,7 +263,7 @@ class FileWatcher:
         self.observers[hotfolder.id] = observer
         self.handlers[hotfolder.id] = handler
         
-        print(f"Überwachung gestartet für: {hotfolder.name}")
+        logger.info(f"Überwachung gestartet für: {hotfolder.name}")
     
     def stop_watching(self, hotfolder_id: str):
         """Stoppt die Überwachung eines Hotfolders"""
@@ -271,7 +275,7 @@ class FileWatcher:
             del self.observers[hotfolder_id]
             del self.handlers[hotfolder_id]
             
-            print(f"Überwachung gestoppt für Hotfolder ID: {hotfolder_id}")
+            logger.info(f"Überwachung gestoppt für Hotfolder ID: {hotfolder_id}")
     
     def stop_all(self):
         """Stoppt alle Überwachungen"""
@@ -281,6 +285,7 @@ class FileWatcher:
         
         # Führe finales Cleanup durch
         self.processor.cleanup_temp_dir()
+        logger.info("Alle Überwachungen gestoppt")
     
     def process_pending_files(self):
         """Verarbeitet ausstehende Dateien in allen Hotfoldern"""
@@ -292,6 +297,7 @@ class FileWatcher:
         if current_time - self._last_cleanup > self._cleanup_interval:
             self.processor.cleanup_temp_dir()
             self._last_cleanup = current_time
+            logger.debug("Cleanup durchgeführt")
     
     def scan_existing_files(self, hotfolder: HotfolderConfig):
         """Scannt und verarbeitet bereits vorhandene Dateien in einem Hotfolder"""
@@ -307,11 +313,15 @@ class FileWatcher:
         processed_files: Set[str] = set()  # Um doppelte Verarbeitung zu vermeiden
         
         # Finde alle passenden Dateien
-        for file_name in os.listdir(hotfolder.input_path):
-            file_path = os.path.join(hotfolder.input_path, file_name)
-            
-            if os.path.isfile(file_path) and handler._matches_pattern(file_path):
-                all_files.append(file_path)
+        try:
+            for file_name in os.listdir(hotfolder.input_path):
+                file_path = os.path.join(hotfolder.input_path, file_name)
+                
+                if os.path.isfile(file_path) and handler._matches_pattern(file_path):
+                    all_files.append(file_path)
+        except Exception as e:
+            logger.error(f"Fehler beim Scannen von {hotfolder.input_path}: {e}")
+            return
         
         # Bei process_pairs: Versuche Paare zu bilden
         if hotfolder.process_pairs:
@@ -330,12 +340,12 @@ class FileWatcher:
                     handler.pending_files[pdf_file] = time.time() - 3  # Markiere als bereit
                     processed_files.add(pdf_file)
                     processed_files.add(xml_file)
-                    print(f"Existierendes Paar gefunden: {os.path.basename(pdf_file)} + {os.path.basename(xml_file)}")
+                    logger.info(f"Existierendes Paar gefunden: {os.path.basename(pdf_file)} + {os.path.basename(xml_file)}")
                 else:
                     # Kein Partner - zur Warteliste hinzufügen (ohne Timeout)
                     handler.waiting_for_partner[pdf_file] = time.time()
                     processed_files.add(pdf_file)
-                    print(f"Existierende PDF ohne XML gefunden, warte auf Partner: {os.path.basename(pdf_file)}")
+                    logger.info(f"Existierende PDF ohne XML gefunden, warte auf Partner: {os.path.basename(pdf_file)}")
             
             # Prüfe verbleibende XMLs
             for xml_file in xml_files:
@@ -345,9 +355,15 @@ class FileWatcher:
                 # XML ohne PDF - zur Warteliste hinzufügen (ohne Timeout)
                 handler.waiting_for_partner[xml_file] = time.time()
                 processed_files.add(xml_file)
-                print(f"Existierende XML ohne PDF gefunden, warte auf Partner: {os.path.basename(xml_file)}")
+                logger.info(f"Existierende XML ohne PDF gefunden, warte auf Partner: {os.path.basename(xml_file)}")
         else:
             # Ohne process_pairs: Verarbeite nur PDFs
             for file_path in all_files:
                 if file_path.lower().endswith('.pdf'):
                     handler.pending_files[file_path] = time.time() - 3  # Markiere als bereit
+                    logger.debug(f"Existierende PDF zur Verarbeitung hinzugefügt: {os.path.basename(file_path)}")
+    
+    def rescan_hotfolder(self, hotfolder: HotfolderConfig):
+        """Führt einen Rescan für einen spezifischen Hotfolder durch"""
+        logger.debug(f"Rescanne Hotfolder: {hotfolder.name}")
+        self.scan_existing_files(hotfolder)

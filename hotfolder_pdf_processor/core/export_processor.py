@@ -98,54 +98,62 @@ class ExportProcessor:
                 if not export.enabled:
                     continue
 
-                # Führe Export durch
-                success, message = self._process_single_export(
-                    pdf_path, xml_path, export, context
-                )
+                success, message = self._process_single_export(pdf_path, xml_path, export, context)
+                results.append((success, message))
 
-                results.append((success, f"{export.name}: {message}"))
+                logger.info(f"Export '{export.name}': {'Erfolgreich' if success else 'Fehlgeschlagen'} - {message}")
 
             except Exception as e:
-                logger.exception("Export-Fehler", extra={
-                    'export_name': export_dict.get('name', 'Unbekannt'),
-                    'export_method': export_dict.get('export_method', 'Unbekannt'),
-                    'export_format': export_dict.get('export_format', 'Unbekannt')
-                })
+                logger.exception(f"Fehler bei Export-Verarbeitung: {e}")
                 results.append((False, f"Export-Fehler: {str(e)}"))
-
-        # Leere Cache
-        self._ocr_cache.clear()
 
         return results
 
     def _build_context(self, pdf_path: str, xml_path: Optional[str],
                        ocr_zones: List[Dict] = None,
                        xml_field_mappings: List[Dict] = None) -> Dict[str, Any]:
-        """Baut den Kontext für Variablen auf"""
+        """Baut den Kontext für Variablen-Ersetzung auf"""
         context = {}
 
-        # Standard-Variablen
-        context.update(self.variable_extractor.get_standard_variables())
+        # Datei-Informationen
+        context['FilePath'] = os.path.dirname(pdf_path)
+        context['FileName'] = os.path.splitext(os.path.basename(pdf_path))[0]
+        context['FileExtension'] = os.path.splitext(pdf_path)[1]
 
-        # Datei-Variablen
-        context.update(self.variable_extractor.get_file_variables(pdf_path))
+        # Datum und Zeit
+        now = datetime.now()
+        context['Date'] = now.strftime("%Y-%m-%d")
+        context['Time'] = now.strftime("%H-%M-%S")
+        context['DateTime'] = now.strftime("%Y-%m-%d_%H-%M-%S")
+        context['Year'] = now.strftime("%Y")
+        context['Month'] = now.strftime("%m")
+        context['Day'] = now.strftime("%d")
 
-        # XML-Variablen
-        if xml_path and os.path.exists(xml_path):
-            context.update(self.variable_extractor.get_xml_variables(xml_path))
-
-        # OCR-Text (wenn benötigt)
-        if pdf_path not in self._ocr_cache:
-            self._ocr_cache[pdf_path] = self.ocr_processor.extract_text_from_pdf(pdf_path)
-        context['OCR_FullText'] = self._ocr_cache[pdf_path]
-
-        # OCR-Zonen
+        # OCR ausführen wenn Zonen definiert sind
         if ocr_zones:
-            for i, zone_info in enumerate(ocr_zones):
-                zone_text = self.ocr_processor.extract_text_from_zone(
-                    pdf_path, zone_info['page_num'], zone_info['zone']
+            # Volltext-OCR (falls noch nicht im Cache)
+            if pdf_path not in self._ocr_cache:
+                full_text = self.ocr_processor.extract_text_from_pdf(pdf_path)
+                self._ocr_cache[pdf_path] = full_text
+            else:
+                full_text = self._ocr_cache[pdf_path]
+
+            context['OCR_FullText'] = full_text
+
+            # OCR-Zonen
+            for zone_dict in ocr_zones:
+                zone_name = zone_dict.get('name', 'Unnamed')
+                page_num = zone_dict.get('page', 1)
+                coordinates = (
+                    zone_dict.get('x', 0),
+                    zone_dict.get('y', 0),
+                    zone_dict.get('width', 100),
+                    zone_dict.get('height', 100)
                 )
-                zone_name = zone_info.get('name', f'Zone_{i+1}')
+
+                zone_text = self.ocr_processor.extract_text_from_zone(
+                    pdf_path, page_num, coordinates
+                )
                 context[zone_name] = zone_text
                 context[f'OCR_{zone_name}'] = zone_text
 
@@ -503,9 +511,9 @@ class ExportProcessor:
                 "pdfa_image_compression": "jpeg",
                 "jpeg_quality": 85,
                 "deskew": True,
-                "clean": True,
+                # "clean": True,  # ENTFERNT: Diese Option benötigt unpaper
                 "rotate_pages": True,
-                "optimize": 3,
+                "optimize": 1,  # GEÄNDERT von 3 auf 1: Optimize-Level 2 und 3 benötigen pngquant
             }
 
             if searchable:
@@ -538,12 +546,11 @@ class ExportProcessor:
             logger.error(f"Fehler: Die PDF-Datei ist verschlüsselt: {os.path.basename(input_pdf)}")
             return False
         except ocrmypdf.exceptions.InputFileError as e:
-            logger.error(f"Fehler: Ungültige PDF-Eingabedatei: {os.path.basename(input_pdf)}. Fehler: {e}")
+            logger.error(f"Fehler: Ungültige PDF-Eingabedatei: {os.path.basename(input_pdf)}. Details: {e}")
             return False
         except Exception as e:
             logger.exception(f"Unerwarteter Fehler bei der PDF/A Konvertierung für {os.path.basename(input_pdf)}")
             return False
-
 
     def _export_to_images(self, pdf_path: str, export_path: str,
                          base_filename: str, format: ExportFormat,
@@ -619,20 +626,28 @@ class ExportProcessor:
                 "zones": {}
             }
 
-            # Füge XML-Daten hinzu wenn vorhanden
+            # XML-Daten hinzufügen
             if xml_path and os.path.exists(xml_path):
                 try:
                     tree = ET.parse(xml_path)
                     root = tree.getroot()
-                    fields_elem = root.find(".//Fields")
-                    if fields_elem is not None:
-                        data["xml_fields"] = {
-                            field.tag: field.text for field in fields_elem
-                        }
+
+                    # Metadaten
+                    metadata = root.find(".//Metadata")
+                    if metadata is not None:
+                        for elem in metadata:
+                            data["metadata"][elem.tag] = elem.text
+
+                    # Felder
+                    fields = root.find(".//Fields")
+                    if fields is not None:
+                        data["fields"] = {}
+                        for field in fields:
+                            data["fields"][field.tag] = field.text
                 except:
                     pass
 
-            # Füge OCR-Zonen hinzu
+            # OCR-Zonen
             for key, value in context.items():
                 if key.startswith('OCR_Zone_') or key.startswith('Zone_'):
                     data["zones"][key] = value
@@ -640,6 +655,7 @@ class ExportProcessor:
             # Speichere JSON
             output_file = os.path.join(export_path, f"{filename}.json")
             output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
+
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -650,19 +666,16 @@ class ExportProcessor:
             return False, f"JSON-Export-Fehler: {str(e)}"
 
     def _export_to_csv(self, pdf_path: str, xml_path: Optional[str],
-                       export_path: str, filename: str,
-                       context: Dict[str, Any]) -> Tuple[bool, str]:
+                      export_path: str, filename: str,
+                      context: Dict[str, Any]) -> Tuple[bool, str]:
         """Exportiert als CSV"""
         try:
-            # Sammle alle Daten
             rows = []
-
-            # Basis-Informationen
             row = {
                 'Dateiname': os.path.basename(pdf_path),
-                'Dateipfad': pdf_path,
-                'Dateigröße': os.path.getsize(pdf_path),
-                'Export-Datum': context.get('DateTime', '')
+                'Pfad': os.path.dirname(pdf_path),
+                'Export_Datum': context.get('Date', ''),
+                'Export_Zeit': context.get('Time', '')
             }
 
             # XML-Felder

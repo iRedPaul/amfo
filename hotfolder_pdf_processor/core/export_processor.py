@@ -105,7 +105,11 @@ class ExportProcessor:
                 results.append((success, f"{export.name}: {message}"))
                 
             except Exception as e:
-                logger.exception(f"Export-Fehler: {e}")
+                logger.exception("Export-Fehler", extra={
+                    'export_name': export_dict.get('name', 'Unbekannt'),
+                    'export_method': export_dict.get('export_method', 'Unbekannt'),
+                    'export_format': export_dict.get('export_format', 'Unbekannt')
+                })
                 results.append((False, f"Export-Fehler: {str(e)}"))
         
         # Leere Cache
@@ -168,6 +172,15 @@ class ExportProcessor:
                              export: ExportConfig, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Verarbeitet einen einzelnen Export"""
         try:
+            # Strukturiertes Logging für Export-Start
+            logger.info("Export gestartet", extra={
+                'export_id': export.id,
+                'export_name': export.name,
+                'export_method': export.export_method.value,
+                'export_format': export.export_format.value,
+                'pdf_path': os.path.basename(pdf_path)
+            })
+            
             # Export-Methode bestimmt den Prozess
             if export.export_method == ExportMethod.FILE:
                 return self._export_to_file(pdf_path, xml_path, export, context)
@@ -400,6 +413,14 @@ class ExportProcessor:
             
             server.send_message(msg, to_addrs=recipients)
             server.quit()
+            
+            # Strukturiertes Logging bei Erfolg
+            logger.info("E-Mail erfolgreich gesendet", extra={
+                'recipient': recipient,
+                'subject': subject[:50] + '...' if len(subject) > 50 else subject,
+                'attachment': attachment_name,
+                'size_kb': os.path.getsize(attachment_path) / 1024
+            })
             
             return True, f"E-Mail gesendet an {recipient}"
             

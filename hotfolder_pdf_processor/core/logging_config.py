@@ -61,12 +61,13 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
             logging.error(f"Fehler beim Aufräumen alter Logs: {e}")
 
 
-def setup_logging(log_dir=None):
+def setup_logging(log_dir=None, log_level=logging.INFO):
     """
     Initialisiert das Logging-System
     
     Args:
         log_dir: Verzeichnis für Log-Dateien (None = Script-Verzeichnis/logs)
+        log_level: Standard-Log-Level (default: INFO)
     
     Returns:
         Logger-Instanz
@@ -78,41 +79,57 @@ def setup_logging(log_dir=None):
     
     # Root Logger konfigurieren
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(logging.DEBUG)  # Root auf DEBUG für Flexibilität
     
     # Entferne existierende Handler
     root_logger.handlers.clear()
     
     # Formatter mit Log-Level-Anzeige
     formatter = logging.Formatter(
-        '[%(asctime)s] %(levelname)s - %(message)s',
+        '[%(asctime)s] %(levelname)-8s %(name)-25s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
     # Custom File Handler mit täglicher Rotation
     file_handler = HotfolderFileHandler(log_dir)
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(log_level)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
     # Console Handler mit Log-Level
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+    console_formatter = logging.Formatter('[%(levelname)-8s] %(message)s')
+    console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
+    
+    # Spezifische Log-Level für verschiedene Module
+    logging.getLogger('gui').setLevel(logging.INFO)  # GUI nur INFO und höher
+    logging.getLogger('core.file_watcher').setLevel(logging.DEBUG)  # File Watcher detailliert
+    logging.getLogger('core.export_processor').setLevel(logging.INFO)
+    logging.getLogger('core.pdf_processor').setLevel(logging.INFO)
+    logging.getLogger('core.ocr_processor').setLevel(logging.INFO)
+    logging.getLogger('core.xml_field_processor').setLevel(logging.INFO)
+    logging.getLogger('core.function_parser').setLevel(logging.WARNING)  # Weniger verbose
+    logging.getLogger('core.hotfolder_manager').setLevel(logging.INFO)
+    logging.getLogger('PIL').setLevel(logging.WARNING)  # Externe Bibliothek weniger verbose
+    logging.getLogger('pytesseract').setLevel(logging.WARNING)
     
     # Log startup message
     logger = logging.getLogger(__name__)
+    logger.info("="*70)
     logger.info(f"Logging aktiviert. Log-Dateien werden gespeichert in: {log_dir}")
     logger.info(f"Aktuelle Log-Datei: hotfolder_{datetime.now().strftime('%Y-%m-%d')}.log")
+    logger.info(f"Standard Log-Level: {logging.getLevelName(log_level)}")
+    logger.info("="*70)
     
     return logger
 
 
 # Globale Funktionen für Kompatibilität
-def initialize_logging():
+def initialize_logging(log_dir=None, log_level=logging.INFO):
     """Kompatibilitäts-Funktion für alte API"""
-    return setup_logging()
+    return setup_logging(log_dir, log_level)
 
 
 def cleanup_logging():

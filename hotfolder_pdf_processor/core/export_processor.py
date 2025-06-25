@@ -17,6 +17,7 @@ import sys
 import xml.etree.ElementTree as ET
 import csv
 from datetime import datetime
+import logging
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -24,6 +25,9 @@ from models.export_config import ExportConfig, ExportFormat, ExportMethod, Email
 from core.function_parser import FunctionParser, VariableExtractor
 from core.ocr_processor import OCRProcessor
 from core.oauth2_manager import OAuth2Manager, get_token_storage
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class ExportProcessor:
@@ -101,6 +105,7 @@ class ExportProcessor:
                 results.append((success, f"{export.name}: {message}"))
                 
             except Exception as e:
+                logger.exception(f"Export-Fehler: {e}")
                 results.append((False, f"Export-Fehler: {str(e)}"))
         
         # Leere Cache
@@ -172,6 +177,7 @@ class ExportProcessor:
                 return False, f"Export-Methode {export.export_method} nicht implementiert"
                 
         except Exception as e:
+            logger.exception(f"Fehler bei Export {export.name}")
             return False, f"Fehler: {str(e)}"
     
     def _export_to_file(self, pdf_path: str, xml_path: Optional[str], 
@@ -300,6 +306,7 @@ class ExportProcessor:
                                       export_filename, context, settings)
                 
         except Exception as e:
+            logger.exception("E-Mail-Export fehlgeschlagen")
             return False, f"E-Mail-Fehler: {str(e)}"
     
     def _send_email(self, email_config: EmailConfig, attachment_path: str, 
@@ -397,6 +404,7 @@ class ExportProcessor:
             return True, f"E-Mail gesendet an {recipient}"
             
         except Exception as e:
+            logger.exception("E-Mail-Versand fehlgeschlagen")
             return False, f"E-Mail-Versand fehlgeschlagen: {str(e)}"
     
     def _get_oauth2_access_token(self, settings: ExportSettings) -> Optional[str]:
@@ -449,13 +457,13 @@ class ExportProcessor:
                     
                     return new_tokens['access_token']
                 else:
-                    print(f"OAuth2 Token-Erneuerung fehlgeschlagen: {new_tokens.get('error', 'Unbekannter Fehler')}")
+                    logger.error(f"OAuth2 Token-Erneuerung fehlgeschlagen: {new_tokens.get('error', 'Unbekannter Fehler')}")
                     return None
             
             return tokens.get('access_token')
             
         except Exception as e:
-            print(f"Fehler beim Abrufen des OAuth2-Tokens: {e}")
+            logger.exception(f"Fehler beim Abrufen des OAuth2-Tokens: {e}")
             return None
     
     def _convert_to_pdf_a(self, input_pdf: str, output_pdf: str, 
@@ -480,7 +488,8 @@ class ExportProcessor:
             # Fallback: Kopiere einfach
             shutil.copy2(input_pdf, output_pdf)
             return True
-        except Exception:
+        except Exception as e:
+            logger.exception("PDF/A Konvertierung fehlgeschlagen")
             return False
     
     def _export_to_images(self, pdf_path: str, export_path: str, 
@@ -537,6 +546,7 @@ class ExportProcessor:
             return True, f"{len(output_files)} Bild(er) exportiert"
             
         except Exception as e:
+            logger.exception("Bild-Export fehlgeschlagen")
             return False, f"Bild-Export-Fehler: {str(e)}"
     
     def _export_to_json(self, pdf_path: str, xml_path: Optional[str], 
@@ -583,6 +593,7 @@ class ExportProcessor:
             return True, f"JSON exportiert nach {output_file}"
             
         except Exception as e:
+            logger.exception("JSON-Export fehlgeschlagen")
             return False, f"JSON-Export-Fehler: {str(e)}"
     
     def _export_to_csv(self, pdf_path: str, xml_path: Optional[str], 
@@ -637,6 +648,7 @@ class ExportProcessor:
             return True, f"CSV exportiert nach {output_file}"
             
         except Exception as e:
+            logger.exception("CSV-Export fehlgeschlagen")
             return False, f"CSV-Export-Fehler: {str(e)}"
     
     def _get_export_settings(self) -> ExportSettings:
@@ -650,7 +662,8 @@ class ExportProcessor:
                         self._export_settings = ExportSettings.from_dict(data)
                 else:
                     self._export_settings = ExportSettings()
-            except:
+            except Exception as e:
+                logger.exception(f"Fehler beim Laden der Export-Einstellungen: {e}")
                 self._export_settings = ExportSettings()
         
         return self._export_settings
@@ -662,7 +675,7 @@ class ExportProcessor:
             with open(settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings.to_dict(), f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"Fehler beim Speichern der Einstellungen: {e}")
+            logger.error(f"Fehler beim Speichern der Einstellungen: {e}")
     
     def get_error_path(self, error_path_expression: str, context: Dict[str, Any]) -> str:
         """Bestimmt den Fehlerpfad"""

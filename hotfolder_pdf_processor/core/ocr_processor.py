@@ -9,6 +9,10 @@ import pytesseract
 from pdf2image import convert_from_path
 from PIL import Image
 import tempfile
+import logging
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class OCRProcessor:
@@ -31,10 +35,11 @@ class OCRProcessor:
             expanded_path = os.path.expandvars(path)
             if os.path.exists(expanded_path):
                 pytesseract.pytesseract.tesseract_cmd = expanded_path
+                logger.debug(f"Tesseract gefunden: {expanded_path}")
                 return
         
         # Wenn nicht gefunden, hoffen wir dass es im PATH ist
-        print("Tesseract nicht in Standard-Pfaden gefunden. Stelle sicher, dass es installiert ist.")
+        logger.warning("Tesseract nicht in Standard-Pfaden gefunden. Stelle sicher, dass es installiert ist.")
     
     def extract_text_from_pdf(self, pdf_path: str, language: str = 'deu') -> str:
         """
@@ -48,6 +53,8 @@ class OCRProcessor:
             Extrahierter Text
         """
         try:
+            logger.debug(f"Starte OCR für: {pdf_path}")
+            
             # Konvertiere PDF zu Bildern
             with tempfile.TemporaryDirectory() as temp_dir:
                 poppler_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
@@ -55,14 +62,17 @@ class OCRProcessor:
                 
                 all_text = []
                 for i, image in enumerate(images):
+                    logger.debug(f"OCR auf Seite {i+1}/{len(images)}")
                     # OCR auf jeder Seite
                     text = pytesseract.image_to_string(image, lang=language)
                     all_text.append(f"--- Seite {i+1} ---\n{text}")
                 
-                return "\n\n".join(all_text)
+                result_text = "\n\n".join(all_text)
+                logger.info(f"OCR abgeschlossen für {pdf_path}: {len(result_text)} Zeichen extrahiert")
+                return result_text
                 
         except Exception as e:
-            print(f"Fehler bei OCR: {e}")
+            logger.error(f"Fehler bei OCR für {pdf_path}: {e}", exc_info=True)
             return ""
     
     def extract_text_from_zone(self, pdf_path: str, page_num: int, 
@@ -81,12 +91,15 @@ class OCRProcessor:
             Extrahierter Text aus der Zone
         """
         try:
+            logger.debug(f"OCR-Zone-Extraktion: {pdf_path}, Seite {page_num}, Zone {zone}")
+            
             # Konvertiere spezifische Seite
             poppler_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
             images = convert_from_path(pdf_path, dpi=300, 
                                      first_page=page_num, last_page=page_num, poppler_path=poppler_path)
             
             if not images:
+                logger.warning(f"Keine Bilder aus PDF-Seite {page_num} konvertiert")
                 return ""
             
             image = images[0]
@@ -97,10 +110,13 @@ class OCRProcessor:
             
             # OCR auf Zone
             text = pytesseract.image_to_string(cropped, lang=language)
-            return text.strip()
+            result = text.strip()
+            
+            logger.debug(f"Zone-OCR Ergebnis: '{result[:50]}...' ({len(result)} Zeichen)")
+            return result
             
         except Exception as e:
-            print(f"Fehler bei Zone OCR: {e}")
+            logger.error(f"Fehler bei Zone OCR für {pdf_path}, Seite {page_num}: {e}", exc_info=True)
             return ""
     
     def find_text_by_pattern(self, text: str, pattern: str) -> List[str]:
@@ -116,9 +132,10 @@ class OCRProcessor:
         """
         try:
             matches = re.findall(pattern, text, re.MULTILINE | re.IGNORECASE)
+            logger.debug(f"Pattern '{pattern}' gefunden: {len(matches)} Treffer")
             return matches
         except re.error as e:
-            print(f"Fehler im regulären Ausdruck: {e}")
+            logger.error(f"Fehler im regulären Ausdruck '{pattern}': {e}")
             return []
     
     def extract_invoice_data(self, text: str) -> Dict[str, str]:
@@ -161,13 +178,17 @@ class OCRProcessor:
                 matches = re.search(pattern, text, re.IGNORECASE)
                 if matches:
                     data[field] = matches.group(1).strip()
+                    logger.debug(f"Rechnungsfeld '{field}' gefunden: {data[field]}")
                     break
         
+        logger.info(f"Rechnungsdaten extrahiert: {len(data)} Felder gefunden")
         return data
     
     def extract_all_numbers(self, text: str) -> List[str]:
         """Extrahiert alle Zahlen aus dem Text"""
-        return re.findall(r'\b\d+[.,]?\d*\b', text)
+        numbers = re.findall(r'\b\d+[.,]?\d*\b', text)
+        logger.debug(f"Zahlen extrahiert: {len(numbers)} gefunden")
+        return numbers
     
     def extract_all_dates(self, text: str) -> List[str]:
         """Extrahiert alle Datumsangaben aus dem Text"""
@@ -181,4 +202,5 @@ class OCRProcessor:
         for pattern in date_patterns:
             dates.extend(re.findall(pattern, text, re.IGNORECASE))
         
+        logger.debug(f"Datumsangaben extrahiert: {len(dates)} gefunden")
         return dates

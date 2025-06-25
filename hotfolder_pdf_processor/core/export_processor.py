@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 import csv
 from datetime import datetime
 import logging
+import ocrmypdf
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,14 +33,14 @@ logger = logging.getLogger(__name__)
 
 class ExportProcessor:
     """Verarbeitet Exporte in verschiedene Formate und über verschiedene Methoden"""
-    
+
     def __init__(self):
         self.function_parser = FunctionParser()
         self.variable_extractor = VariableExtractor()
         self.ocr_processor = OCRProcessor()
         self._export_settings = None
         self._ocr_cache = {}
-    
+
     def _get_unique_filename(self, filepath: str) -> str:
         """
         Gibt einen eindeutigen Dateinamen zurück, falls die Datei bereits existiert.
@@ -47,12 +48,12 @@ class ExportProcessor:
         """
         if not os.path.exists(filepath):
             return filepath
-        
+
         # Trenne Pfad, Dateiname und Erweiterung
         directory = os.path.dirname(filepath)
         filename = os.path.basename(filepath)
         name, ext = os.path.splitext(filename)
-        
+
         # Versuche zuerst mit Counter
         counter = 1
         while counter < 1000:  # Maximal 1000 Versuche mit Counter
@@ -61,49 +62,49 @@ class ExportProcessor:
             if not os.path.exists(new_filepath):
                 return new_filepath
             counter += 1
-        
+
         # Falls alle Counter belegt sind, verwende Timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Mit Millisekunden
         new_filename = f"{name}_{timestamp}{ext}"
         new_filepath = os.path.join(directory, new_filename)
-        
+
         # Falls auch das existiert (sehr unwahrscheinlich), füge noch eine Zufallszahl hinzu
         if os.path.exists(new_filepath):
             import random
             rand_num = random.randint(1000, 9999)
             new_filename = f"{name}_{timestamp}_{rand_num}{ext}"
             new_filepath = os.path.join(directory, new_filename)
-        
+
         return new_filepath
-    
-    def process_exports(self, pdf_path: str, xml_path: Optional[str], 
-                       export_configs: List[Dict], ocr_zones: List[Dict] = None,
-                       xml_field_mappings: List[Dict] = None) -> List[Tuple[bool, str]]:
+
+    def process_exports(self, pdf_path: str, xml_path: Optional[str],
+                        export_configs: List[Dict], ocr_zones: List[Dict] = None,
+                        xml_field_mappings: List[Dict] = None) -> List[Tuple[bool, str]]:
         """
         Führt alle konfigurierten Exporte durch
-        
+
         Returns:
             Liste von (success, message) Tupeln für jeden Export
         """
         results = []
-        
+
         # Baue Kontext für Variablen auf
         context = self._build_context(pdf_path, xml_path, ocr_zones, xml_field_mappings)
-        
+
         for export_dict in export_configs:
             try:
                 export = ExportConfig.from_dict(export_dict)
-                
+
                 if not export.enabled:
                     continue
-                
+
                 # Führe Export durch
                 success, message = self._process_single_export(
                     pdf_path, xml_path, export, context
                 )
-                
+
                 results.append((success, f"{export.name}: {message}"))
-                
+
             except Exception as e:
                 logger.exception("Export-Fehler", extra={
                     'export_name': export_dict.get('name', 'Unbekannt'),
@@ -111,33 +112,33 @@ class ExportProcessor:
                     'export_format': export_dict.get('export_format', 'Unbekannt')
                 })
                 results.append((False, f"Export-Fehler: {str(e)}"))
-        
+
         # Leere Cache
         self._ocr_cache.clear()
-        
+
         return results
-    
-    def _build_context(self, pdf_path: str, xml_path: Optional[str], 
-                      ocr_zones: List[Dict] = None, 
-                      xml_field_mappings: List[Dict] = None) -> Dict[str, Any]:
+
+    def _build_context(self, pdf_path: str, xml_path: Optional[str],
+                       ocr_zones: List[Dict] = None,
+                       xml_field_mappings: List[Dict] = None) -> Dict[str, Any]:
         """Baut den Kontext für Variablen auf"""
         context = {}
-        
+
         # Standard-Variablen
         context.update(self.variable_extractor.get_standard_variables())
-        
+
         # Datei-Variablen
         context.update(self.variable_extractor.get_file_variables(pdf_path))
-        
+
         # XML-Variablen
         if xml_path and os.path.exists(xml_path):
             context.update(self.variable_extractor.get_xml_variables(xml_path))
-        
+
         # OCR-Text (wenn benötigt)
         if pdf_path not in self._ocr_cache:
             self._ocr_cache[pdf_path] = self.ocr_processor.extract_text_from_pdf(pdf_path)
         context['OCR_FullText'] = self._ocr_cache[pdf_path]
-        
+
         # OCR-Zonen
         if ocr_zones:
             for i, zone_info in enumerate(ocr_zones):
@@ -147,7 +148,7 @@ class ExportProcessor:
                 zone_name = zone_info.get('name', f'Zone_{i+1}')
                 context[zone_name] = zone_text
                 context[f'OCR_{zone_name}'] = zone_text
-        
+
         # XML-Feld-Mappings als Variablen
         if xml_field_mappings:
             for mapping in xml_field_mappings:
@@ -162,14 +163,14 @@ class ExportProcessor:
                             context[field_name] = field_elem.text
                     except:
                         pass
-        
+
         # Spezielle Export-Variablen
         context['OutputPath'] = os.path.dirname(pdf_path)
-        
+
         return context
-    
-    def _process_single_export(self, pdf_path: str, xml_path: Optional[str], 
-                             export: ExportConfig, context: Dict[str, Any]) -> Tuple[bool, str]:
+
+    def _process_single_export(self, pdf_path: str, xml_path: Optional[str],
+                              export: ExportConfig, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Verarbeitet einen einzelnen Export"""
         try:
             # Strukturiertes Logging für Export-Start
@@ -180,7 +181,7 @@ class ExportProcessor:
                 'export_format': export.export_format.value,
                 'pdf_path': os.path.basename(pdf_path)
             })
-            
+
             # Export-Methode bestimmt den Prozess
             if export.export_method == ExportMethod.FILE:
                 return self._export_to_file(pdf_path, xml_path, export, context)
@@ -188,30 +189,30 @@ class ExportProcessor:
                 return self._export_to_email(pdf_path, xml_path, export, context)
             else:
                 return False, f"Export-Methode {export.export_method} nicht implementiert"
-                
+
         except Exception as e:
             logger.exception(f"Fehler bei Export {export.name}")
             return False, f"Fehler: {str(e)}"
-    
-    def _export_to_file(self, pdf_path: str, xml_path: Optional[str], 
-                       export: ExportConfig, context: Dict[str, Any]) -> Tuple[bool, str]:
+
+    def _export_to_file(self, pdf_path: str, xml_path: Optional[str],
+                        export: ExportConfig, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Exportiert als Datei"""
         # Evaluiere Pfad und Dateiname
         export_path = self.function_parser.parse_and_evaluate(
             export.export_path_expression, context
         ) if export.export_path_expression else ""
-        
+
         # Wenn kein Export-Pfad definiert, verwende Fehlerordner
         if not export_path:
             export_path = self.get_error_path("", context)
-        
+
         export_filename = self.function_parser.parse_and_evaluate(
             export.export_filename_expression, context
         )
-        
+
         # Stelle sicher, dass Pfad existiert
         os.makedirs(export_path, exist_ok=True)
-        
+
         # Konvertiere je nach Format
         if export.export_format == ExportFormat.PDF:
             # Einfache PDF-Kopie
@@ -219,26 +220,26 @@ class ExportProcessor:
             output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
             shutil.copy2(pdf_path, output_file)
             return True, f"PDF exportiert nach {output_file}"
-            
+
         elif export.export_format == ExportFormat.PDF_A:
             # PDF/A Konvertierung
             output_file = os.path.join(export_path, f"{export_filename}.pdf")
             output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
             success = self._convert_to_pdf_a(pdf_path, output_file, False)
             return success, f"PDF/A {'exportiert' if success else 'Fehler'}: {output_file}"
-            
+
         elif export.export_format == ExportFormat.SEARCHABLE_PDF_A:
             # Durchsuchbares PDF/A
             output_file = os.path.join(export_path, f"{export_filename}.pdf")
             output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
             success = self._convert_to_pdf_a(pdf_path, output_file, True)
             return success, f"Durchsuchbares PDF/A {'exportiert' if success else 'Fehler'}: {output_file}"
-            
+
         elif export.export_format in [ExportFormat.PNG, ExportFormat.JPG, ExportFormat.TIFF]:
             # Bild-Export
-            return self._export_to_images(pdf_path, export_path, export_filename, 
-                                        export.export_format, export.format_params)
-            
+            return self._export_to_images(pdf_path, export_path, export_filename,
+                                          export.export_format, export.format_params)
+
         elif export.export_format == ExportFormat.XML:
             # XML-Export
             if xml_path and os.path.exists(xml_path):
@@ -248,12 +249,12 @@ class ExportProcessor:
                 return True, f"XML exportiert nach {output_file}"
             else:
                 return False, "Keine XML-Datei vorhanden"
-                
+
         elif export.export_format == ExportFormat.JSON:
             # JSON-Export
-            return self._export_to_json(pdf_path, xml_path, export_path, 
+            return self._export_to_json(pdf_path, xml_path, export_path,
                                       export_filename, context)
-            
+
         elif export.export_format == ExportFormat.TXT:
             # Text-Export (OCR)
             output_file = os.path.join(export_path, f"{export_filename}.txt")
@@ -261,26 +262,26 @@ class ExportProcessor:
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(context.get('OCR_FullText', ''))
             return True, f"Text exportiert nach {output_file}"
-            
+
         elif export.export_format == ExportFormat.CSV:
             # CSV-Export
-            return self._export_to_csv(pdf_path, xml_path, export_path, 
+            return self._export_to_csv(pdf_path, xml_path, export_path,
                                      export_filename, context)
-            
+
         else:
             return False, f"Format {export.export_format} nicht implementiert"
-    
-    def _export_to_email(self, pdf_path: str, xml_path: Optional[str], 
+
+    def _export_to_email(self, pdf_path: str, xml_path: Optional[str],
                         export: ExportConfig, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Exportiert per E-Mail"""
         if not export.email_config:
             return False, "Keine E-Mail-Konfiguration vorhanden"
-        
+
         # Lade E-Mail-Einstellungen
         settings = self._get_export_settings()
         if not settings.smtp_server:
             return False, "Keine SMTP-Server-Einstellungen konfiguriert"
-        
+
         try:
             # Erstelle temporäre Export-Datei
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -288,7 +289,7 @@ class ExportProcessor:
                 export_filename = self.function_parser.parse_and_evaluate(
                     export.export_filename_expression, context
                 )
-                
+
                 # Konvertiere je nach Format
                 if export.export_format == ExportFormat.PDF:
                     attachment_path = os.path.join(temp_dir, f"{export_filename}.pdf")
@@ -307,29 +308,29 @@ class ExportProcessor:
                     success, message = self._export_to_file(pdf_path, xml_path, fake_export, context)
                     if not success:
                         return False, f"Fehler beim Erstellen des Anhangs: {message}"
-                    
+
                     # Finde erstellte Datei
                     files = list(Path(temp_dir).glob(f"{export_filename}.*"))
                     if not files:
                         return False, "Anhang konnte nicht erstellt werden"
                     attachment_path = str(files[0])
-                
+
                 # Sende E-Mail
-                return self._send_email(export.email_config, attachment_path, 
+                return self._send_email(export.email_config, attachment_path,
                                       export_filename, context, settings)
-                
+
         except Exception as e:
             logger.exception("E-Mail-Export fehlgeschlagen")
             return False, f"E-Mail-Fehler: {str(e)}"
-    
-    def _send_email(self, email_config: EmailConfig, attachment_path: str, 
-                   attachment_name: str, context: Dict[str, Any], 
+
+    def _send_email(self, email_config: EmailConfig, attachment_path: str,
+                   attachment_name: str, context: Dict[str, Any],
                    settings: ExportSettings) -> Tuple[bool, str]:
         """Sendet eine E-Mail mit Anhang"""
         try:
             # Erstelle Nachricht
             msg = MIMEMultipart()
-            
+
             # Evaluiere E-Mail-Felder
             recipient = self.function_parser.parse_and_evaluate(
                 email_config.recipient, context
@@ -340,11 +341,11 @@ class ExportProcessor:
             body = self.function_parser.parse_and_evaluate(
                 email_config.body_expression, context
             )
-            
+
             msg['From'] = settings.smtp_from_address
             msg['To'] = recipient
             msg['Subject'] = subject
-            
+
             if email_config.cc:
                 cc = self.function_parser.parse_and_evaluate(email_config.cc, context)
                 if cc:
@@ -353,16 +354,16 @@ class ExportProcessor:
                 bcc = self.function_parser.parse_and_evaluate(email_config.bcc, context)
                 if bcc:
                     msg['Bcc'] = bcc
-            
+
             # Nachrichtentext
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
-            
+
             # Anhang
             with open(attachment_path, 'rb') as f:
                 part = MIMEBase('application', 'octet-stream')
                 part.set_payload(f.read())
                 encoders.encode_base64(part)
-                
+
                 # Bestimme Dateiendung
                 ext = Path(attachment_path).suffix
                 part.add_header(
@@ -370,7 +371,7 @@ class ExportProcessor:
                     f'attachment; filename="{attachment_name}{ext}"'
                 )
                 msg.attach(part)
-            
+
             # Prüfe Auth-Methode
             access_token = None
             if settings.smtp_auth_method == AuthMethod.OAUTH2:
@@ -378,7 +379,7 @@ class ExportProcessor:
                 access_token = self._get_oauth2_access_token(settings)
                 if not access_token:
                     return False, "OAuth2-Token konnte nicht abgerufen werden"
-            
+
             # Verbinde zum Server
             if settings.smtp_use_ssl and settings.smtp_port == 465:
                 # SSL direkt verwenden (Port 465)
@@ -389,7 +390,7 @@ class ExportProcessor:
                 server = smtplib.SMTP(settings.smtp_server, settings.smtp_port)
                 if settings.smtp_use_tls:
                     server.starttls()
-            
+
             # Anmelden
             if settings.smtp_auth_method == AuthMethod.OAUTH2 and access_token:
                 # OAuth2-Anmeldung
@@ -403,17 +404,17 @@ class ExportProcessor:
                 # Standard-Anmeldung
                 if settings.smtp_username and settings.smtp_password:
                     server.login(settings.smtp_username, settings.smtp_password)
-            
+
             # Sende E-Mail
             recipients = [recipient]
             if email_config.cc:
                 recipients.extend(email_config.cc.split(','))
             if email_config.bcc:
                 recipients.extend(email_config.bcc.split(','))
-            
+
             server.send_message(msg, to_addrs=recipients)
             server.quit()
-            
+
             # Strukturiertes Logging bei Erfolg
             logger.info("E-Mail erfolgreich gesendet", extra={
                 'recipient': recipient,
@@ -421,23 +422,23 @@ class ExportProcessor:
                 'attachment': attachment_name,
                 'size_kb': os.path.getsize(attachment_path) / 1024
             })
-            
+
             return True, f"E-Mail gesendet an {recipient}"
-            
+
         except Exception as e:
             logger.exception("E-Mail-Versand fehlgeschlagen")
             return False, f"E-Mail-Versand fehlgeschlagen: {str(e)}"
-    
+
     def _get_oauth2_access_token(self, settings: ExportSettings) -> Optional[str]:
         """Holt oder erneuert den OAuth2 Access Token"""
         try:
             if not settings.oauth2_provider or not settings.oauth2_refresh_token:
                 return None
-            
+
             # OAuth2 Manager
             oauth2_manager = OAuth2Manager(settings.oauth2_provider)
             token_storage = get_token_storage()
-            
+
             # Hole gespeicherte Tokens
             tokens = token_storage.get_tokens(settings.oauth2_provider, settings.smtp_from_address)
             if not tokens:
@@ -447,7 +448,7 @@ class ExportProcessor:
                     'refresh_token': settings.oauth2_refresh_token,
                     'token_expiry': settings.oauth2_token_expiry
                 }
-            
+
             # Prüfe ob Token erneuert werden muss
             if oauth2_manager.is_token_expired(tokens.get('token_expiry', '')):
                 # Token erneuern
@@ -455,11 +456,11 @@ class ExportProcessor:
                     settings.oauth2_client_id,
                     settings.oauth2_client_secret
                 )
-                
+
                 success, new_tokens = oauth2_manager.refresh_access_token(
                     tokens.get('refresh_token', '')
                 )
-                
+
                 if success:
                     # Speichere neue Tokens
                     token_storage.set_tokens(
@@ -467,67 +468,98 @@ class ExportProcessor:
                         settings.smtp_from_address,
                         new_tokens
                     )
-                    
+
                     # Update Settings
                     settings.oauth2_access_token = new_tokens['access_token']
                     settings.oauth2_refresh_token = new_tokens.get('refresh_token', settings.oauth2_refresh_token)
                     settings.oauth2_token_expiry = new_tokens['token_expiry']
-                    
+
                     # Speichere Settings
                     self._save_export_settings(settings)
-                    
+
                     return new_tokens['access_token']
                 else:
                     logger.error(f"OAuth2 Token-Erneuerung fehlgeschlagen: {new_tokens.get('error', 'Unbekannter Fehler')}")
                     return None
-            
+
             return tokens.get('access_token')
-            
+
         except Exception as e:
             logger.exception(f"Fehler beim Abrufen des OAuth2-Tokens: {e}")
             return None
-    
-    def _convert_to_pdf_a(self, input_pdf: str, output_pdf: str, 
-                         searchable: bool) -> bool:
-        """Konvertiert zu PDF/A"""
+
+    def _convert_to_pdf_a(self, input_pdf: str, output_pdf: str,
+                          searchable: bool, pdfa_version: str = "2b") -> bool:
+        """
+        Konvertiert eine PDF-Datei in eine "perfekte" PDF/A-Datei, optional mit durchsuchbarem Text.
+        Verwendet ocrmypdf für eine robuste Konvertierung und OCR.
+        """
         try:
-            import ocrmypdf
-            
-            ocrmypdf.ocr(
-                input_pdf,
-                output_pdf,
-                pdfa_image_compression="jpeg",
-                output_type="pdfa",
-                tesseract_timeout=300 if searchable else 0,
-                skip_text=not searchable,
-                force_ocr=searchable,
-                language="deu" if searchable else None
-            )
+            logger.info(f"Starte {'durchsuchbare ' if searchable else ''}PDF/A-{pdfa_version} Konvertierung für: {os.path.basename(input_pdf)}")
+
+            # Argumente für ocrmypdf
+            args = {
+                "output_type": "pdfa",
+                "pdfa_image_compression": "jpeg",
+                "jpeg_quality": 85,
+                "deskew": True,
+                "clean": True,
+                "rotate_pages": True,
+                "optimize": 3,
+            }
+
+            if searchable:
+                args.update({
+                    "language": "deu",
+                    "force_ocr": True,
+                    "skip_text": False,
+                    "tesseract_timeout": 600,
+                })
+            else:
+                args.update({
+                    "tesseract_timeout": 0,
+                    "skip_text": True,
+                })
+
+            # Ausführung von ocrmypdf
+            result = ocrmypdf.ocr(input_pdf, output_pdf, **args)
+
+            if result == ocrmypdf.ExitCode.already_done_ocr:
+                logger.warning(f"Datei wurde bereits mit OCR verarbeitet und übersprungen: {os.path.basename(input_pdf)}")
+                shutil.copy2(input_pdf, output_pdf)
+            elif result != ocrmypdf.ExitCode.ok:
+                logger.error(f"ocrmypdf Konvertierung fehlgeschlagen mit Exit-Code: {result.name} ({result.value})")
+                return False
+
+            logger.info(f"PDF/A Konvertierung erfolgreich abgeschlossen: {os.path.basename(output_pdf)}")
             return True
-            
-        except ImportError:
-            # Fallback: Kopiere einfach
-            shutil.copy2(input_pdf, output_pdf)
-            return True
-        except Exception as e:
-            logger.exception("PDF/A Konvertierung fehlgeschlagen")
+
+        except ocrmypdf.exceptions.EncryptedPdfError:
+            logger.error(f"Fehler: Die PDF-Datei ist verschlüsselt: {os.path.basename(input_pdf)}")
             return False
-    
-    def _export_to_images(self, pdf_path: str, export_path: str, 
-                         base_filename: str, format: ExportFormat, 
+        except ocrmypdf.exceptions.InputFileError as e:
+            logger.error(f"Fehler: Ungültige PDF-Eingabedatei: {os.path.basename(input_pdf)}. Fehler: {e}")
+            return False
+        except Exception as e:
+            logger.exception(f"Unerwarteter Fehler bei der PDF/A Konvertierung für {os.path.basename(input_pdf)}")
+            return False
+
+
+    def _export_to_images(self, pdf_path: str, export_path: str,
+                         base_filename: str, format: ExportFormat,
                          params: Dict[str, Any]) -> Tuple[bool, str]:
         """Exportiert PDF als Bilder"""
         try:
             from pdf2image import convert_from_path
-            
+
             # Parameter
             dpi = params.get('dpi', 300)
             quality = params.get('quality', 95)
-            
+
             # Konvertiere zu Bildern
             poppler_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
             images = convert_from_path(pdf_path, dpi=dpi, poppler_path=poppler_path)
-            
+
             # Speichere Bilder
             output_files = []
             for i, image in enumerate(images):
@@ -535,7 +567,7 @@ class ExportProcessor:
                     filename = f"{base_filename}_page_{i+1:03d}"
                 else:
                     filename = base_filename
-                
+
                 if format == ExportFormat.PNG:
                     output_file = os.path.join(export_path, f"{filename}.png")
                     output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
@@ -561,17 +593,17 @@ class ExportProcessor:
                     else:
                         output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
                         image.save(output_file, 'TIFF', compression="tiff_lzw")
-                
+
                 output_files.append(output_file)
-            
+
             return True, f"{len(output_files)} Bild(er) exportiert"
-            
+
         except Exception as e:
             logger.exception("Bild-Export fehlgeschlagen")
             return False, f"Bild-Export-Fehler: {str(e)}"
-    
-    def _export_to_json(self, pdf_path: str, xml_path: Optional[str], 
-                       export_path: str, filename: str, 
+
+    def _export_to_json(self, pdf_path: str, xml_path: Optional[str],
+                       export_path: str, filename: str,
                        context: Dict[str, Any]) -> Tuple[bool, str]:
         """Exportiert als JSON"""
         try:
@@ -586,7 +618,7 @@ class ExportProcessor:
                 "ocr_text": context.get('OCR_FullText', ''),
                 "zones": {}
             }
-            
+
             # Füge XML-Daten hinzu wenn vorhanden
             if xml_path and os.path.exists(xml_path):
                 try:
@@ -599,32 +631,32 @@ class ExportProcessor:
                         }
                 except:
                     pass
-            
+
             # Füge OCR-Zonen hinzu
             for key, value in context.items():
                 if key.startswith('OCR_Zone_') or key.startswith('Zone_'):
                     data["zones"][key] = value
-            
+
             # Speichere JSON
             output_file = os.path.join(export_path, f"{filename}.json")
             output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            
+
             return True, f"JSON exportiert nach {output_file}"
-            
+
         except Exception as e:
             logger.exception("JSON-Export fehlgeschlagen")
             return False, f"JSON-Export-Fehler: {str(e)}"
-    
-    def _export_to_csv(self, pdf_path: str, xml_path: Optional[str], 
-                      export_path: str, filename: str, 
-                      context: Dict[str, Any]) -> Tuple[bool, str]:
+
+    def _export_to_csv(self, pdf_path: str, xml_path: Optional[str],
+                       export_path: str, filename: str,
+                       context: Dict[str, Any]) -> Tuple[bool, str]:
         """Exportiert als CSV"""
         try:
             # Sammle alle Daten
             rows = []
-            
+
             # Basis-Informationen
             row = {
                 'Dateiname': os.path.basename(pdf_path),
@@ -632,7 +664,7 @@ class ExportProcessor:
                 'Dateigröße': os.path.getsize(pdf_path),
                 'Export-Datum': context.get('DateTime', '')
             }
-            
+
             # XML-Felder
             if xml_path and os.path.exists(xml_path):
                 try:
@@ -644,7 +676,7 @@ class ExportProcessor:
                             row[f"XML_{field.tag}"] = field.text or ""
                 except:
                     pass
-            
+
             # OCR-Zonen
             for key, value in context.items():
                 if key.startswith('OCR_Zone_') or key.startswith('Zone_'):
@@ -653,25 +685,25 @@ class ExportProcessor:
                     if len(text) > 100:
                         text = text[:100] + "..."
                     row[key] = text
-            
+
             rows.append(row)
-            
+
             # Schreibe CSV
             output_file = os.path.join(export_path, f"{filename}.csv")
             output_file = self._get_unique_filename(output_file)  # Eindeutigen Namen sicherstellen
-            
+
             if rows:
                 with open(output_file, 'w', newline='', encoding='utf-8-sig') as f:
                     writer = csv.DictWriter(f, fieldnames=rows[0].keys(), delimiter=';')
                     writer.writeheader()
                     writer.writerows(rows)
-            
+
             return True, f"CSV exportiert nach {output_file}"
-            
+
         except Exception as e:
             logger.exception("CSV-Export fehlgeschlagen")
             return False, f"CSV-Export-Fehler: {str(e)}"
-    
+
     def _get_export_settings(self) -> ExportSettings:
         """Lädt die Export-Einstellungen"""
         if self._export_settings is None:
@@ -686,9 +718,9 @@ class ExportProcessor:
             except Exception as e:
                 logger.exception(f"Fehler beim Laden der Export-Einstellungen: {e}")
                 self._export_settings = ExportSettings()
-        
+
         return self._export_settings
-    
+
     def _save_export_settings(self, settings: ExportSettings):
         """Speichert die Export-Einstellungen"""
         try:
@@ -697,24 +729,24 @@ class ExportProcessor:
                 json.dump(settings.to_dict(), f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Fehler beim Speichern der Einstellungen: {e}")
-    
+
     def get_error_path(self, error_path_expression: str, context: Dict[str, Any]) -> str:
         """Bestimmt den Fehlerpfad"""
         # Wenn Ausdruck definiert, evaluiere ihn
         if error_path_expression:
             return self.function_parser.parse_and_evaluate(error_path_expression, context)
-        
+
         # Sonst verwende Standard aus Einstellungen
         settings = self._get_export_settings()
         if settings.default_error_path:
             return settings.default_error_path
-        
+
         # Fallback: AppData-Ordner
         appdata = os.getenv('APPDATA')
         if appdata:
             default_error_path = os.path.join(appdata, 'HotfolderPDFProcessor', 'errors')
             os.makedirs(default_error_path, exist_ok=True)
             return default_error_path
-        
+
         # Letzter Fallback: Input-Ordner/errors
         return os.path.join(context.get('FilePath', '.'), 'errors')

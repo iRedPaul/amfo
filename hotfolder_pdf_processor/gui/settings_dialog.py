@@ -7,12 +7,15 @@ from typing import Optional
 import sys
 import os
 import json
+import logging
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.export_config import ExportSettings, AuthMethod
 from gui.oauth2_setup_dialog import OAuth2SetupDialog
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # GUI-Komponenten nur INFO und höher
 
 class SettingsDialog:
     """Dialog für globale Einstellungen"""
@@ -79,7 +82,7 @@ class SettingsDialog:
                     data = json.load(f)
                     return ExportSettings.from_dict(data)
         except Exception as e:
-            print(f"Fehler beim Laden der Einstellungen: {e}")
+            logger.error(f"Fehler beim Laden der Einstellungen: {e}")
         
         return ExportSettings()
     
@@ -89,7 +92,7 @@ class SettingsDialog:
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings.to_dict(), f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"Fehler beim Speichern der Einstellungen: {e}")
+            logger.error(f"Fehler beim Speichern der Einstellungen: {e}")
     
     def _create_widgets(self):
         """Erstellt alle Widgets"""

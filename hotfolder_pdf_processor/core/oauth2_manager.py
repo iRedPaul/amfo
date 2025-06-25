@@ -14,6 +14,10 @@ from typing import Optional, Dict, Tuple
 from urllib.parse import urlencode, parse_qs
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
+import logging
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class OAuth2Config:
@@ -168,6 +172,7 @@ class OAuth2Manager:
             
             # Öffne Browser
             webbrowser.open(auth_url)
+            logger.info("Browser für OAuth2-Authentifizierung geöffnet")
             
             # Warte auf Callback
             timeout = time.time() + 120  # 2 Minuten
@@ -175,18 +180,22 @@ class OAuth2Manager:
                 if self.server.auth_code:
                     auth_code = self.server.auth_code
                     self._stop_server()
+                    logger.info("OAuth2-Autorisierungscode erhalten")
                     return True, auth_code
                 elif self.server.auth_error:
                     error = self.server.auth_error
                     self._stop_server()
+                    logger.error(f"OAuth2-Autorisierung fehlgeschlagen: {error}")
                     return False, error
                 time.sleep(0.1)
             
             self._stop_server()
+            logger.error("OAuth2-Authentifizierung: Timeout erreicht")
             return False, "Timeout - Keine Antwort vom Benutzer erhalten"
             
         except Exception as e:
             self._stop_server()
+            logger.exception(f"Fehler beim Starten des OAuth2-Flows: {e}")
             return False, f"Fehler beim Starten des OAuth2-Flows: {str(e)}"
     
     def _run_server(self):
@@ -194,8 +203,8 @@ class OAuth2Manager:
         try:
             while self.server:
                 self.server.handle_request()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Fehler im OAuth2-Server: {e}")
     
     def _stop_server(self):
         """Stoppt den HTTP-Server"""
@@ -222,6 +231,7 @@ class OAuth2Manager:
         }
         
         try:
+            logger.debug("Tausche Autorisierungscode gegen Tokens")
             response = requests.post(self.config['token_url'], data=token_data)
             response.raise_for_status()
             
@@ -231,6 +241,7 @@ class OAuth2Manager:
             expires_in = tokens.get('expires_in', 3600)
             expiry = datetime.now() + timedelta(seconds=expires_in)
             
+            logger.info("OAuth2-Tokens erfolgreich erhalten")
             return True, {
                 'access_token': tokens.get('access_token', ''),
                 'refresh_token': tokens.get('refresh_token', ''),
@@ -239,6 +250,7 @@ class OAuth2Manager:
             }
             
         except requests.exceptions.RequestException as e:
+            logger.error(f"Token-Austausch fehlgeschlagen: {e}")
             return False, {'error': f"Token-Austausch fehlgeschlagen: {str(e)}"}
     
     def refresh_access_token(self, refresh_token: str) -> Tuple[bool, Dict[str, str]]:
@@ -256,6 +268,7 @@ class OAuth2Manager:
         }
         
         try:
+            logger.debug("Erneuere OAuth2-Access-Token")
             response = requests.post(self.config['token_url'], data=token_data)
             response.raise_for_status()
             
@@ -265,6 +278,7 @@ class OAuth2Manager:
             expires_in = tokens.get('expires_in', 3600)
             expiry = datetime.now() + timedelta(seconds=expires_in)
             
+            logger.info("OAuth2-Token erfolgreich erneuert")
             return True, {
                 'access_token': tokens.get('access_token', ''),
                 'refresh_token': tokens.get('refresh_token', refresh_token),  # Manche Provider geben neuen Refresh Token
@@ -273,6 +287,7 @@ class OAuth2Manager:
             }
             
         except requests.exceptions.RequestException as e:
+            logger.error(f"Token-Erneuerung fehlgeschlagen: {e}")
             return False, {'error': f"Token-Erneuerung fehlgeschlagen: {str(e)}"}
     
     def is_token_expired(self, token_expiry: str) -> bool:
@@ -280,8 +295,12 @@ class OAuth2Manager:
         try:
             expiry = datetime.fromisoformat(token_expiry)
             # 5 Minuten Puffer
-            return datetime.now() >= expiry - timedelta(minutes=5)
-        except:
+            is_expired = datetime.now() >= expiry - timedelta(minutes=5)
+            if is_expired:
+                logger.debug("OAuth2-Token ist abgelaufen")
+            return is_expired
+        except Exception as e:
+            logger.error(f"Fehler beim Prüfen der Token-Gültigkeit: {e}")
             return True
     
     def create_oauth2_sasl_string(self, username: str, access_token: str) -> str:
@@ -313,7 +332,9 @@ class OAuth2TokenStorage:
             if os.path.exists(self.storage_file):
                 with open(self.storage_file, 'r', encoding='utf-8') as f:
                     self._tokens = json.load(f)
-        except:
+                logger.debug(f"OAuth2-Tokens geladen: {len(self._tokens)} Konten")
+        except Exception as e:
+            logger.error(f"Fehler beim Laden der OAuth2-Tokens: {e}")
             self._tokens = {}
     
     def save_tokens(self):
@@ -334,26 +355,33 @@ class OAuth2TokenStorage:
             backup_file = f"{self.storage_file}.backup"
             if os.path.exists(backup_file):
                 os.remove(backup_file)
+            
+            logger.debug("OAuth2-Tokens gespeichert")
                 
         except Exception as e:
-            print(f"Fehler beim Speichern der OAuth2-Tokens: {e}")
+            logger.error(f"Fehler beim Speichern der OAuth2-Tokens: {e}")
             # Stelle Backup wieder her
             backup_file = f"{self.storage_file}.backup"
             if os.path.exists(backup_file):
                 if os.path.exists(self.storage_file):
                     os.remove(self.storage_file)
                 os.rename(backup_file, self.storage_file)
+                logger.info("OAuth2-Token-Backup wiederhergestellt")
     
     def get_tokens(self, provider: str, username: str) -> Optional[Dict[str, str]]:
         """Holt gespeicherte Tokens für einen Benutzer"""
         key = f"{provider}:{username}"
-        return self._tokens.get(key)
+        tokens = self._tokens.get(key)
+        if tokens:
+            logger.debug(f"OAuth2-Tokens abgerufen für {username}")
+        return tokens
     
     def set_tokens(self, provider: str, username: str, tokens: Dict[str, str]):
         """Speichert Tokens für einen Benutzer"""
         key = f"{provider}:{username}"
         self._tokens[key] = tokens
         self.save_tokens()
+        logger.info(f"OAuth2-Tokens gespeichert für {username}")
     
     def remove_tokens(self, provider: str, username: str):
         """Entfernt Tokens für einen Benutzer"""
@@ -361,6 +389,7 @@ class OAuth2TokenStorage:
         if key in self._tokens:
             del self._tokens[key]
             self.save_tokens()
+            logger.info(f"OAuth2-Tokens entfernt für {username}")
 
 
 # Globale Token-Storage Instanz
@@ -371,4 +400,5 @@ def get_token_storage() -> OAuth2TokenStorage:
     global _token_storage
     if _token_storage is None:
         _token_storage = OAuth2TokenStorage()
+        logger.debug("Globale OAuth2-Token-Storage Instanz erstellt")
     return _token_storage

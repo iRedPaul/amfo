@@ -1,184 +1,459 @@
 """
-OCR-Verarbeitung für PDFs
+OCR Processor Module
+
+Handles optical character recognition operations for various image formats.
+Uses the centralized logging system for consistent logging across the application.
 """
+
 import os
-import re
-from typing import Dict, List, Tuple, Optional, Any
-from pathlib import Path
-import pytesseract
-from pdf2image import convert_from_path
-from PIL import Image
 import tempfile
+from typing import Dict, List, Optional, Tuple, Any
+from PIL import Image
+import pytesseract
+import cv2
+import numpy as np
+from pathlib import Path
+
+from core.logger import Logger
 
 
 class OCRProcessor:
-    """Führt OCR auf PDF-Dateien aus und extrahiert Text"""
+    """
+    Handles OCR processing operations for various image formats.
+    """
     
-    def __init__(self):
-        # Versuche Tesseract zu finden
-        self._setup_tesseract()
-        
-    def _setup_tesseract(self):
-        """Konfiguriert Tesseract OCR"""
-        # Standard-Pfade für Tesseract auf Windows
-        tesseract_paths = [
-            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-            r"C:\Users\%USERNAME%\AppData\Local\Tesseract-OCR\tesseract.exe"
-        ]
-        
-        for path in tesseract_paths:
-            expanded_path = os.path.expandvars(path)
-            if os.path.exists(expanded_path):
-                pytesseract.pytesseract.tesseract_cmd = expanded_path
-                return
-        
-        # Wenn nicht gefunden, hoffen wir dass es im PATH ist
-        print("Tesseract nicht in Standard-Pfaden gefunden. Stelle sicher, dass es installiert ist.")
-    
-    def extract_text_from_pdf(self, pdf_path: str, language: str = 'deu') -> str:
+    def __init__(self, config: Dict[str, Any]):
         """
-        Extrahiert Text aus einer PDF-Datei mittels OCR
+        Initialize the OCR processor.
         
         Args:
-            pdf_path: Pfad zur PDF-Datei
-            language: OCR-Sprache (deu für Deutsch, eng für Englisch)
+            config: Configuration dictionary containing OCR settings
+        """
+        self.logger = Logger()
+        self.config = config
+        self.supported_formats = ['.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.gif']
+        
+        # OCR Engine-Konfiguration
+        self.tesseract_config = config.get('tesseract_config', '--psm 3')
+        self.language = config.get('ocr_language', 'deu+eng')
+        self.confidence_threshold = config.get('confidence_threshold', 60)
+        
+        self.logger.info(
+            "OCR Processor initialisiert",
+            extra={
+                'supported_formats': self.supported_formats,
+                'language': self.language,
+                'confidence_threshold': self.confidence_threshold
+            }
+        )
+    
+    def is_supported_format(self, file_path: str) -> bool:
+        """
+        Check if the file format is supported for OCR processing.
+        
+        Args:
+            file_path: Path to the file
             
         Returns:
-            Extrahierter Text
+            bool: True if format is supported
+        """
+        file_ext = Path(file_path).suffix.lower()
+        supported = file_ext in self.supported_formats
+        
+        if not supported:
+            self.logger.warning(
+                "Nicht unterstütztes Dateiformat für OCR",
+                extra={
+                    'file_path': file_path,
+                    'file_extension': file_ext,
+                    'supported_formats': self.supported_formats
+                }
+            )
+        
+        return supported
+    
+    def preprocess_image(self, image_path: str) -> Optional[np.ndarray]:
+        """
+        Preprocess image for better OCR results.
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            Preprocessed image as numpy array or None if error
         """
         try:
-            # Konvertiere PDF zu Bildern
-            with tempfile.TemporaryDirectory() as temp_dir:
-                poppler_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
-                images = convert_from_path(pdf_path, dpi=300, poppler_path=poppler_path)
-                
-                all_text = []
-                for i, image in enumerate(images):
-                    # OCR auf jeder Seite
-                    text = pytesseract.image_to_string(image, lang=language)
-                    all_text.append(f"--- Seite {i+1} ---\n{text}")
-                
-                return "\n\n".join(all_text)
-                
+            self.logger.debug(
+                "Starte Bildvorverarbeitung für OCR",
+                extra={'image_path': image_path}
+            )
+            
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Konnte Bild nicht laden: {image_path}")
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Apply preprocessing techniques
+            # 1. Noise reduction
+            denoised = cv2.medianBlur(gray, 3)
+            
+            # 2. Contrast enhancement
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(denoised)
+            
+            # 3. Thresholding
+            _, thresh = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            self.logger.debug(
+                "Bildvorverarbeitung abgeschlossen",
+                extra={
+                    'image_path': image_path,
+                    'original_shape': image.shape,
+                    'processed_shape': thresh.shape
+                }
+            )
+            
+            return thresh
+            
         except Exception as e:
-            print(f"Fehler bei OCR: {e}")
+            self.logger.error(
+                "Fehler bei Bildvorverarbeitung",
+                extra={
+                    'image_path': image_path,
+                    'error': str(e)
+                },
+                exc_info=True
+            )
+            return None
+    
+    def extract_text_with_confidence(self, image_path: str) -> Tuple[str, float]:
+        """
+        Extract text from image with confidence scoring.
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            Tuple of (extracted_text, average_confidence)
+        """
+        try:
+            self.logger.debug(
+                "Starte OCR-Textextraktion",
+                extra={'image_path': image_path}
+            )
+            
+            # Preprocess image
+            processed_image = self.preprocess_image(image_path)
+            if processed_image is None:
+                return "", 0.0
+            
+            # Perform OCR with detailed data
+            ocr_data = pytesseract.image_to_data(
+                processed_image,
+                lang=self.language,
+                config=self.tesseract_config,
+                output_type=pytesseract.Output.DICT
+            )
+            
+            # Extract text and calculate confidence
+            text_parts = []
+            confidences = []
+            
+            for i, confidence in enumerate(ocr_data['conf']):
+                if int(confidence) >= self.confidence_threshold:
+                    text = ocr_data['text'][i].strip()
+                    if text:
+                        text_parts.append(text)
+                        confidences.append(int(confidence))
+            
+            extracted_text = ' '.join(text_parts)
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+            
+            self.logger.info(
+                "OCR-Textextraktion abgeschlossen",
+                extra={
+                    'image_path': image_path,
+                    'text_length': len(extracted_text),
+                    'average_confidence': avg_confidence,
+                    'high_confidence_words': len(confidences),
+                    'total_words': len([t for t in ocr_data['text'] if t.strip()])
+                }
+            )
+            
+            return extracted_text, avg_confidence
+            
+        except Exception as e:
+            self.logger.error(
+                "Fehler bei OCR-Textextraktion",
+                extra={
+                    'image_path': image_path,
+                    'error': str(e)
+                },
+                exc_info=True
+            )
+            return "", 0.0
+    
+    def extract_text_simple(self, image_path: str) -> str:
+        """
+        Simple text extraction without confidence scoring.
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            Extracted text
+        """
+        try:
+            self.logger.debug(
+                "Starte einfache OCR-Textextraktion",
+                extra={'image_path': image_path}
+            )
+            
+            # Check if file exists
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"Bilddatei nicht gefunden: {image_path}")
+            
+            # Perform OCR
+            extracted_text = pytesseract.image_to_string(
+                image_path,
+                lang=self.language,
+                config=self.tesseract_config
+            ).strip()
+            
+            self.logger.info(
+                "Einfache OCR-Textextraktion abgeschlossen",
+                extra={
+                    'image_path': image_path,
+                    'text_length': len(extracted_text)
+                }
+            )
+            
+            return extracted_text
+            
+        except Exception as e:
+            self.logger.error(
+                "Fehler bei einfacher OCR-Textextraktion",
+                extra={
+                    'image_path': image_path,
+                    'error': str(e)
+                },
+                exc_info=True
+            )
             return ""
     
-    def extract_text_from_zone(self, pdf_path: str, page_num: int, 
-                             zone: Tuple[int, int, int, int], 
-                             language: str = 'deu') -> str:
+    def process_multiple_images(self, image_paths: List[str]) -> Dict[str, Dict[str, Any]]:
         """
-        Extrahiert Text aus einer bestimmten Zone einer PDF-Seite
+        Process multiple images with OCR.
         
         Args:
-            pdf_path: Pfad zur PDF-Datei
-            page_num: Seitennummer (1-basiert)
-            zone: Tuple (x, y, width, height) in Pixeln
-            language: OCR-Sprache
+            image_paths: List of image file paths
             
         Returns:
-            Extrahierter Text aus der Zone
+            Dictionary with results for each image
+        """
+        results = {}
+        
+        self.logger.info(
+            "Starte Batch-OCR-Verarbeitung",
+            extra={
+                'total_images': len(image_paths),
+                'supported_formats': self.supported_formats
+            }
+        )
+        
+        successful_count = 0
+        failed_count = 0
+        
+        for image_path in image_paths:
+            try:
+                if not self.is_supported_format(image_path):
+                    results[image_path] = {
+                        'success': False,
+                        'error': 'Nicht unterstütztes Dateiformat',
+                        'text': '',
+                        'confidence': 0.0
+                    }
+                    failed_count += 1
+                    continue
+                
+                text, confidence = self.extract_text_with_confidence(image_path)
+                
+                results[image_path] = {
+                    'success': True,
+                    'text': text,
+                    'confidence': confidence,
+                    'error': None
+                }
+                successful_count += 1
+                
+            except Exception as e:
+                self.logger.error(
+                    "Fehler bei Batch-OCR für Bild",
+                    extra={
+                        'image_path': image_path,
+                        'error': str(e)
+                    },
+                    exc_info=True
+                )
+                
+                results[image_path] = {
+                    'success': False,
+                    'error': str(e),
+                    'text': '',
+                    'confidence': 0.0
+                }
+                failed_count += 1
+        
+        self.logger.info(
+            "Batch-OCR-Verarbeitung abgeschlossen",
+            extra={
+                'total_images': len(image_paths),
+                'successful': successful_count,
+                'failed': failed_count
+            }
+        )
+        
+        return results
+    
+    def get_image_info(self, image_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed information about an image file.
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            Dictionary with image information or None if error
         """
         try:
-            # Konvertiere spezifische Seite
-            poppler_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
-            images = convert_from_path(pdf_path, dpi=300, 
-                                     first_page=page_num, last_page=page_num, poppler_path=poppler_path)
+            self.logger.debug(
+                "Sammle Bildinformationen",
+                extra={'image_path': image_path}
+            )
             
-            if not images:
-                return ""
+            # Check if file exists
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"Bilddatei nicht gefunden: {image_path}")
             
-            image = images[0]
+            # Get file info
+            file_stats = os.stat(image_path)
             
-            # Schneide Zone aus
-            x, y, w, h = zone
-            cropped = image.crop((x, y, x + w, y + h))
+            # Get image info using PIL
+            with Image.open(image_path) as img:
+                info = {
+                    'file_path': image_path,
+                    'file_size': file_stats.st_size,
+                    'format': img.format,
+                    'mode': img.mode,
+                    'size': img.size,
+                    'width': img.width,
+                    'height': img.height,
+                    'has_transparency': img.mode in ('RGBA', 'LA') or 'transparency' in img.info
+                }
             
-            # OCR auf Zone
-            text = pytesseract.image_to_string(cropped, lang=language)
-            return text.strip()
+            self.logger.debug(
+                "Bildinformationen gesammelt",
+                extra={
+                    'image_path': image_path,
+                    'image_info': info
+                }
+            )
+            
+            return info
             
         except Exception as e:
-            print(f"Fehler bei Zone OCR: {e}")
-            return ""
+            self.logger.error(
+                "Fehler beim Sammeln von Bildinformationen",
+                extra={
+                    'image_path': image_path,
+                    'error': str(e)
+                },
+                exc_info=True
+            )
+            return None
     
-    def find_text_by_pattern(self, text: str, pattern: str) -> List[str]:
+    def validate_ocr_setup(self) -> bool:
         """
-        Findet Text mittels regulärem Ausdruck
+        Validate that OCR setup is working correctly.
         
-        Args:
-            text: Zu durchsuchender Text
-            pattern: Regulärer Ausdruck
-            
         Returns:
-            Liste der gefundenen Übereinstimmungen
+            bool: True if OCR setup is valid
         """
         try:
-            matches = re.findall(pattern, text, re.MULTILINE | re.IGNORECASE)
-            return matches
-        except re.error as e:
-            print(f"Fehler im regulären Ausdruck: {e}")
-            return []
+            self.logger.info("Validiere OCR-Setup")
+            
+            # Test Tesseract installation
+            version = pytesseract.get_tesseract_version()
+            self.logger.info(
+                "Tesseract-Version gefunden",
+                extra={'version': str(version)}
+            )
+            
+            # Test language availability
+            languages = pytesseract.get_languages()
+            required_langs = self.language.split('+')
+            missing_langs = [lang for lang in required_langs if lang not in languages]
+            
+            if missing_langs:
+                self.logger.error(
+                    "Erforderliche OCR-Sprachen nicht verfügbar",
+                    extra={
+                        'missing_languages': missing_langs,
+                        'available_languages': languages,
+                        'required_languages': required_langs
+                    }
+                )
+                return False
+            
+            # Create test image for basic functionality test
+            test_image = Image.new('RGB', (200, 50), color='white')
+            
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                test_image.save(tmp_file.name)
+                
+                # Test basic OCR functionality
+                result = pytesseract.image_to_string(tmp_file.name, lang=self.language)
+                
+                # Clean up
+                os.unlink(tmp_file.name)
+            
+            self.logger.info(
+                "OCR-Setup erfolgreich validiert",
+                extra={
+                    'tesseract_version': str(version),
+                    'available_languages': languages,
+                    'configured_language': self.language
+                }
+            )
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(
+                "OCR-Setup-Validierung fehlgeschlagen",
+                extra={'error': str(e)},
+                exc_info=True
+            )
+            return False
     
-    def extract_invoice_data(self, text: str) -> Dict[str, str]:
+    def cleanup_temp_files(self):
         """
-        Extrahiert typische Rechnungsdaten aus Text
-        
-        Returns:
-            Dictionary mit gefundenen Daten
+        Clean up any temporary files created during OCR processing.
         """
-        data = {}
-        
-        # Rechnungsnummer
-        patterns = {
-            'invoice_number': [
-                r'Rechnungsnummer[:\s]+([A-Z0-9\-/]+)',
-                r'Rechnung\s*Nr[.:\s]+([A-Z0-9\-/]+)',
-                r'Invoice\s*Number[:\s]+([A-Z0-9\-/]+)'
-            ],
-            'date': [
-                r'Datum[:\s]+(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})',
-                r'Rechnungsdatum[:\s]+(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})',
-                r'Date[:\s]+(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})'
-            ],
-            'amount': [
-                r'Gesamtbetrag[:\s]+([0-9.,]+)\s*€',
-                r'Total[:\s]+([0-9.,]+)\s*€',
-                r'Summe[:\s]+([0-9.,]+)\s*€',
-                r'€\s*([0-9.,]+)',
-                r'EUR\s*([0-9.,]+)'
-            ],
-            'tax_id': [
-                r'USt[\-\.]?IdNr[.:\s]+([A-Z]{2}[A-Z0-9]+)',
-                r'VAT[:\s]+([A-Z]{2}[A-Z0-9]+)',
-                r'UID[:\s]+([A-Z]{2}[A-Z0-9]+)'
-            ]
-        }
-        
-        for field, pattern_list in patterns.items():
-            for pattern in pattern_list:
-                matches = re.search(pattern, text, re.IGNORECASE)
-                if matches:
-                    data[field] = matches.group(1).strip()
-                    break
-        
-        return data
-    
-    def extract_all_numbers(self, text: str) -> List[str]:
-        """Extrahiert alle Zahlen aus dem Text"""
-        return re.findall(r'\b\d+[.,]?\d*\b', text)
-    
-    def extract_all_dates(self, text: str) -> List[str]:
-        """Extrahiert alle Datumsangaben aus dem Text"""
-        date_patterns = [
-            r'\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}',
-            r'\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}',
-            r'\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4}'
-        ]
-        
-        dates = []
-        for pattern in date_patterns:
-            dates.extend(re.findall(pattern, text, re.IGNORECASE))
-        
-        return dates
+        try:
+            self.logger.debug("Bereinige temporäre OCR-Dateien")
+            
+            # This method can be extended to clean up specific temp files
+            # created during OCR processing if needed
+            
+            self.logger.debug("Temporäre OCR-Dateien bereinigt")
+            
+        except Exception as e:
+            self.logger.error(
+                "Fehler bei der Bereinigung temporärer OCR-Dateien",
+                extra={'error': str(e)},
+                exc_info=True
+            )

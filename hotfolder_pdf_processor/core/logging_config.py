@@ -7,7 +7,6 @@ from pathlib import Path
 import os
 import sys
 from datetime import datetime, timedelta
-import glob
 
 class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
     """Custom Handler für tägliche Logs mit speziellem Dateinamen-Format"""
@@ -62,13 +61,12 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
             logging.error(f"Fehler beim Aufräumen alter Logs: {e}")
 
 
-def setup_logging(log_dir=None, capture_print=True):
+def setup_logging(log_dir=None):
     """
     Initialisiert das Logging-System
     
     Args:
         log_dir: Verzeichnis für Log-Dateien (None = Script-Verzeichnis/logs)
-        capture_print: Wenn True, werden print() Statements zu logging umgeleitet
     
     Returns:
         Logger-Instanz
@@ -98,14 +96,10 @@ def setup_logging(log_dir=None, capture_print=True):
     root_logger.addHandler(file_handler)
     
     # Console Handler mit Log-Level
-    console_handler = logging.StreamHandler(sys.__stdout__)  # Original stdout
+    console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))  # Log-Level in Console
+    console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
     root_logger.addHandler(console_handler)
-    
-    # Optional: Capture print statements
-    if capture_print:
-        sys.stdout = PrintToLogger()
     
     # Log startup message
     logger = logging.getLogger(__name__)
@@ -115,42 +109,12 @@ def setup_logging(log_dir=None, capture_print=True):
     return logger
 
 
-class PrintToLogger:
-    """Leitet print() Statements zu logging um"""
-    
-    def __init__(self):
-        self.logger = logging.getLogger('print')
-        self.linebuf = ''
-    
-    def write(self, buf):
-        # Original stdout für Console
-        sys.__stdout__.write(buf)
-        sys.__stdout__.flush()
-        
-        # An Logger
-        self.linebuf += buf
-        while '\n' in self.linebuf:
-            line, self.linebuf = self.linebuf.split('\n', 1)
-            if line.strip():
-                self.logger.info(line)
-    
-    def flush(self):
-        if self.linebuf.strip():
-            self.logger.info(self.linebuf)
-            self.linebuf = ''
-        sys.__stdout__.flush()
-    
-    def isatty(self):
-        return False
-
-
-def cleanup_logging():
-    """Stellt das originale stdout wieder her"""
-    sys.stdout = sys.__stdout__
-    logging.shutdown()
-
-
 # Globale Funktionen für Kompatibilität
 def initialize_logging():
     """Kompatibilitäts-Funktion für alte API"""
     return setup_logging()
+
+
+def cleanup_logging():
+    """Stub-Funktion für Kompatibilität - macht nichts mehr"""
+    logging.shutdown()

@@ -85,9 +85,9 @@ def setup_logging(log_dir=None, capture_print=True):
     # Entferne existierende Handler
     root_logger.handlers.clear()
     
-    # Formatter (gleiche Format wie vorher)
+    # Formatter mit Log-Level-Anzeige
     formatter = logging.Formatter(
-        '[%(asctime)s] %(message)s',
+        '[%(asctime)s] %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
@@ -97,10 +97,10 @@ def setup_logging(log_dir=None, capture_print=True):
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
-    # Console Handler
+    # Console Handler mit Log-Level
     console_handler = logging.StreamHandler(sys.__stdout__)  # Original stdout
     console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter('%(message)s'))  # Keine Timestamps in Console
+    console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))  # Log-Level in Console
     root_logger.addHandler(console_handler)
     
     # Optional: Capture print statements

@@ -1,0 +1,156 @@
+"""
+Logging-Konfiguration für Hotfolder PDF Processor
+"""
+import logging
+import logging.handlers
+from pathlib import Path
+import os
+import sys
+from datetime import datetime, timedelta
+import glob
+
+class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
+    """Custom Handler für tägliche Logs mit speziellem Dateinamen-Format"""
+    
+    def __init__(self, log_dir, **kwargs):
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # Basis-Dateiname für heute
+        filename = self.log_dir / f"hotfolder_{datetime.now().strftime('%Y-%m-%d')}.log"
+        
+        super().__init__(
+            filename=filename,
+            when='midnight',
+            interval=1,
+            backupCount=0,  # Wir machen eigenes Cleanup
+            encoding='utf-8',
+            **kwargs
+        )
+        
+        # Cleanup alter Logs beim Start
+        self.cleanup_old_logs(30)
+    
+    def doRollover(self):
+        """Überschreibe Rollover für custom Dateinamen"""
+        super().doRollover()
+        # Neuer Dateiname für den neuen Tag
+        self.baseFilename = str(self.log_dir / f"hotfolder_{datetime.now().strftime('%Y-%m-%d')}.log")
+        # Cleanup nach Rollover
+        self.cleanup_old_logs(30)
+    
+    def cleanup_old_logs(self, days_to_keep=30):
+        """Löscht alte Log-Dateien"""
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+            
+            for log_file in self.log_dir.glob("hotfolder_*.log"):
+                # Extrahiere Datum aus Dateiname
+                try:
+                    date_str = log_file.stem.replace("hotfolder_", "")
+                    file_date = datetime.strptime(date_str, "%Y-%m-%d")
+                    
+                    if file_date < cutoff_date:
+                        log_file.unlink()
+                        logging.info(f"Alte Log-Datei gelöscht: {log_file.name}")
+                        
+                except ValueError:
+                    # Ignoriere Dateien mit ungültigem Datumformat
+                    pass
+                    
+        except Exception as e:
+            logging.error(f"Fehler beim Aufräumen alter Logs: {e}")
+
+
+def setup_logging(log_dir=None, capture_print=True):
+    """
+    Initialisiert das Logging-System
+    
+    Args:
+        log_dir: Verzeichnis für Log-Dateien (None = Script-Verzeichnis/logs)
+        capture_print: Wenn True, werden print() Statements zu logging umgeleitet
+    
+    Returns:
+        Logger-Instanz
+    """
+    if log_dir is None:
+        log_dir = Path(os.path.dirname(os.path.abspath(sys.argv[0]))) / "logs"
+    
+    log_dir = Path(log_dir)
+    
+    # Root Logger konfigurieren
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    
+    # Entferne existierende Handler
+    root_logger.handlers.clear()
+    
+    # Formatter (gleiche Format wie vorher)
+    formatter = logging.Formatter(
+        '[%(asctime)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Custom File Handler mit täglicher Rotation
+    file_handler = HotfolderFileHandler(log_dir)
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    
+    # Console Handler
+    console_handler = logging.StreamHandler(sys.__stdout__)  # Original stdout
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter('%(message)s'))  # Keine Timestamps in Console
+    root_logger.addHandler(console_handler)
+    
+    # Optional: Capture print statements
+    if capture_print:
+        sys.stdout = PrintToLogger()
+    
+    # Log startup message
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging aktiviert. Log-Dateien werden gespeichert in: {log_dir}")
+    logger.info(f"Aktuelle Log-Datei: hotfolder_{datetime.now().strftime('%Y-%m-%d')}.log")
+    
+    return logger
+
+
+class PrintToLogger:
+    """Leitet print() Statements zu logging um"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger('print')
+        self.linebuf = ''
+    
+    def write(self, buf):
+        # Original stdout für Console
+        sys.__stdout__.write(buf)
+        sys.__stdout__.flush()
+        
+        # An Logger
+        self.linebuf += buf
+        while '\n' in self.linebuf:
+            line, self.linebuf = self.linebuf.split('\n', 1)
+            if line.strip():
+                self.logger.info(line)
+    
+    def flush(self):
+        if self.linebuf.strip():
+            self.logger.info(self.linebuf)
+            self.linebuf = ''
+        sys.__stdout__.flush()
+    
+    def isatty(self):
+        return False
+
+
+def cleanup_logging():
+    """Stellt das originale stdout wieder her"""
+    sys.stdout = sys.__stdout__
+    logging.shutdown()
+
+
+# Globale Funktionen für Kompatibilität
+def initialize_logging():
+    """Kompatibilitäts-Funktion für alte API"""
+    return setup_logging()

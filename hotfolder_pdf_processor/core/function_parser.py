@@ -3,6 +3,7 @@ Function Parser für Variablen und Funktionen
 """
 import re
 import os
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union, Tuple
 import xml.etree.ElementTree as ET
@@ -14,9 +15,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     from core.counter_manager import get_counter_manager
 except ImportError:
-    # Fallback falls counter_manager nicht verfügbar
     def get_counter_manager():
         return None
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class FunctionParser:
@@ -115,13 +118,14 @@ class FunctionParser:
                 try:
                     result = self.functions[func_name](*evaluated_args)
                 except Exception as e:
-                    print(f"Fehler bei Funktion {func_name}: {e}")
+                    logger.error(f"Fehler bei Funktion {func_name}: {e}")
                     result = ""
                 
                 # Ersetze Funktionsaufruf mit Ergebnis
                 expression = expression[:match.start()] + str(result) + expression[match.end():]
             else:
                 # Unbekannte Funktion, entferne sie
+                logger.warning(f"Unbekannte Funktion: {func_name}")
                 expression = expression[:match.start()] + expression[match.end():]
         
         return expression
@@ -196,7 +200,8 @@ class FunctionParser:
                 num_digits = format_string.count('#')
                 return var.zfill(num_digits)
             return var
-        except:
+        except Exception as e:
+            logger.error(f"Fehler bei FORMAT: {e}")
             return var
     
     def _trim(self, var: str) -> str:
@@ -207,14 +212,16 @@ class FunctionParser:
         """LEFT Funktion"""
         try:
             return var[:int(length)]
-        except:
+        except Exception as e:
+            logger.error(f"Fehler bei LEFT: {e}")
             return var
     
     def _right(self, var: str, length: str) -> str:
         """RIGHT Funktion"""
         try:
             return var[-int(length):]
-        except:
+        except Exception as e:
+            logger.error(f"Fehler bei RIGHT: {e}")
             return var
     
     def _mid(self, var: str, start: str, length: str = None) -> str:
@@ -225,7 +232,8 @@ class FunctionParser:
                 return var[start_idx:start_idx + int(length)]
             else:
                 return var[start_idx:]
-        except:
+        except Exception as e:
+            logger.error(f"Fehler bei MID: {e}")
             return var
     
     def _toupper(self, var: str) -> str:
@@ -256,7 +264,8 @@ class FunctionParser:
             
             idx = search_in.find(search_for, start_idx)
             return str(idx + 1) if idx >= 0 else "0"  # 1-basiert
-        except:
+        except Exception as e:
+            logger.error(f"Fehler bei INDEXOF: {e}")
             return "0"
     
     # Datumsfunktionen
@@ -339,10 +348,10 @@ class FunctionParser:
             return formatted_result
                 
         except Exception as e:
-            print(f"Fehler bei FORMATDATE: {e}")
-            print(f"Format-String: {format_string}")
+            logger.error(f"Fehler bei FORMATDATE: {e}")
+            logger.error(f"Format-String: {format_string}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return datetime.now().strftime("%d.%m.%Y")
     
     def _contains_single_char(self, format_string: str, char: str) -> bool:
@@ -414,11 +423,11 @@ class FunctionParser:
                 step=step_val
             )
             
-            print(f"AUTOINCREMENT '{counter_name}': {current_value} (nächster: {current_value + step_val})")
+            logger.debug(f"AUTOINCREMENT '{counter_name}': {current_value} (nächster: {current_value + step_val})")
             return str(current_value)
             
         except Exception as e:
-            print(f"Fehler bei AUTOINCREMENT: {e}")
+            logger.error(f"Fehler bei AUTOINCREMENT: {e}")
             return start_value
     
     # Bedingungen
@@ -470,7 +479,7 @@ class FunctionParser:
             return true_result if result else false_result
             
         except Exception as e:
-            print(f"Fehler bei IF: {e}")
+            logger.error(f"Fehler bei IF: {e}")
             return false_result
     
     # Reguläre Ausdrücke
@@ -491,7 +500,7 @@ class FunctionParser:
                         return matches[0]
             return ""
         except Exception as e:
-            print(f"Fehler bei REGEXP.MATCH: {e}")
+            logger.error(f"Fehler bei REGEXP.MATCH: {e}")
             return ""
     
     def _regexp_replace(self, var: str, pattern: str, replacement: str) -> str:
@@ -499,7 +508,7 @@ class FunctionParser:
         try:
             return re.sub(pattern, replacement, var)
         except Exception as e:
-            print(f"Fehler bei REGEXP.REPLACE: {e}")
+            logger.error(f"Fehler bei REGEXP.REPLACE: {e}")
             return var
     
     # Scripting
@@ -509,7 +518,7 @@ class FunctionParser:
             import subprocess
             
             if not os.path.exists(script_path):
-                print(f"Script nicht gefunden: {script_path}")
+                logger.error(f"Script nicht gefunden: {script_path}")
                 return ""
             
             # Führe Script aus
@@ -520,17 +529,18 @@ class FunctionParser:
                 cmd = ['cscript', '//NoLogo', script_path] + list(args)
                 result = subprocess.run(cmd, capture_output=True, text=True)
             else:
-                print(f"Unbekannter Script-Typ: {script_path}")
+                logger.error(f"Unbekannter Script-Typ: {script_path}")
                 return ""
             
             if result.returncode == 0:
+                logger.debug(f"Script erfolgreich ausgeführt: {script_path}")
                 return result.stdout.strip()
             else:
-                print(f"Script-Fehler: {result.stderr}")
+                logger.error(f"Script-Fehler: {result.stderr}")
                 return ""
                 
         except Exception as e:
-            print(f"Fehler bei SCRIPTING: {e}")
+            logger.error(f"Fehler bei SCRIPTING: {e}")
             return ""
 
 
@@ -608,6 +618,6 @@ class VariableExtractor:
                     variables[f'XML_Doc_{attr_name}'] = attr_value
                     
         except Exception as e:
-            print(f"Fehler beim Extrahieren von XML-Variablen: {e}")
+            logger.error(f"Fehler beim Extrahieren von XML-Variablen: {e}")
         
         return variables

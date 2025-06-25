@@ -8,11 +8,15 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from pathlib import Path
 import sys
+import logging
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.ocr_processor import OCRProcessor
 from core.function_parser import FunctionParser, VariableExtractor
+
+# Logger für dieses Modul
+logger = logging.getLogger(__name__)
 
 
 class FieldMapping:
@@ -123,13 +127,13 @@ class XMLFieldProcessor:
             # Finde Document-Element
             doc_elem = root.find(".//Document")
             if doc_elem is None:
-                print("Kein Document-Element in XML gefunden")
+                logger.warning("Kein Document-Element in XML gefunden")
                 return False
             
             # Finde Fields-Element
             fields_elem = doc_elem.find("Fields")
             if fields_elem is None:
-                print("Kein Fields-Element in XML gefunden")
+                logger.warning("Kein Fields-Element in XML gefunden")
                 return False
             
             # Sammle alle verfügbaren Variablen (ohne bereits evaluierte Felder)
@@ -159,10 +163,10 @@ class XMLFieldProcessor:
                         
                         # Setze Wert
                         field_elem.text = str(value)
-                        print(f"Feld '{mapping.field_name}' gesetzt auf: {value}")
+                        logger.info(f"Feld '{mapping.field_name}' gesetzt auf: {value}")
                     
                 except Exception as e:
-                    print(f"Fehler bei Mapping für Feld '{mapping.field_name}': {e}")
+                    logger.error(f"Fehler bei Mapping für Feld '{mapping.field_name}': {e}")
             
             # Speichere XML
             self._indent_xml(root)
@@ -175,7 +179,7 @@ class XMLFieldProcessor:
             return True
             
         except Exception as e:
-            print(f"Fehler bei XML-Verarbeitung: {e}")
+            logger.error(f"Fehler bei XML-Verarbeitung: {e}")
             return False
     
     def _build_context(self, xml_path: str, pdf_path: str, 
@@ -197,7 +201,7 @@ class XMLFieldProcessor:
         # OCR-Text (lazy loading)
         if any(m.expression and 'OCR' in m.expression for m in mappings):
             if pdf_path not in self._ocr_cache:
-                print(f"Führe OCR aus auf: {pdf_path}")
+                logger.info(f"Führe OCR aus auf: {pdf_path}")
                 self._ocr_cache[pdf_path] = self.ocr_processor.extract_text_from_pdf(pdf_path)
             
             context['OCR_FullText'] = self._ocr_cache[pdf_path]
@@ -207,7 +211,7 @@ class XMLFieldProcessor:
             for i, zone_info in enumerate(ocr_zones):
                 zone_key = f"{zone_info['page_num']}_{zone_info['zone']}"
                 if zone_key not in self._zone_cache:
-                    print(f"Führe OCR aus für Zone '{zone_info['name']}' auf Seite {zone_info['page_num']}")
+                    logger.info(f"Führe OCR aus für Zone '{zone_info['name']}' auf Seite {zone_info['page_num']}")
                     zone_text = self.ocr_processor.extract_text_from_zone(
                         pdf_path, zone_info['page_num'], zone_info['zone']
                     )
@@ -221,7 +225,7 @@ class XMLFieldProcessor:
                 context[f'OCR_Zone_{i+1}'] = self._zone_cache[zone_key]
                 context[f'ZONE_{i+1}'] = self._zone_cache[zone_key]
                 
-                print(f"Zone '{zone_name}' enthält: '{self._zone_cache[zone_key][:50]}...'")
+                logger.debug(f"Zone '{zone_name}' enthält: '{self._zone_cache[zone_key][:50]}...'")
         
         # OCR-Zonen aus Mappings (Legacy Support)
         for mapping in mappings:
@@ -328,7 +332,7 @@ class XMLFieldProcessor:
             return sorted(fields)
             
         except Exception as e:
-            print(f"Fehler beim Lesen der XML-Felder: {e}")
+            logger.error(f"Fehler beim Lesen der XML-Felder: {e}")
             return []
     
     def clear_ocr_cache(self):

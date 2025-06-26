@@ -1,5 +1,5 @@
 """
-Dialog zur Konfiguration von Exporten - Verbesserte Version
+Dialog zur Konfiguration von Exporten
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 import sys
 import os
 import uuid
+import re
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -723,6 +724,9 @@ class ExportEditDialog:
            quality_label = ttk.Label(self.format_options_frame, text=f"{quality_var.get()}%")
            quality_label.grid(row=0, column=2, padx=(5, 0))
            
+           # WICHTIG: Initialen Wert sofort speichern!
+           self.format_params['quality'] = quality_var.get()
+           
            def update_quality_label(value):
                quality_label.config(text=f"{int(float(value))}%")
                self.format_params['quality'] = int(float(value))
@@ -734,14 +738,25 @@ class ExportEditDialog:
            dpi_combo = ttk.Combobox(self.format_options_frame, textvariable=dpi_var, 
                                    values=[72, 150, 300, 600], width=10)
            dpi_combo.grid(row=1, column=1, sticky=tk.W, pady=(5, 0))
+           
+           # WICHTIG: Initialen DPI-Wert sofort speichern!
+           self.format_params['dpi'] = dpi_var.get()
+           
+           # Update-Handler für DPI
            dpi_combo.bind('<<ComboboxSelected>>', lambda e: self.format_params.update({'dpi': dpi_var.get()}))
+           # Auch für manuelle Eingabe
+           dpi_combo.bind('<FocusOut>', lambda e: self.format_params.update({'dpi': dpi_var.get()}))
            
        elif format_value == ExportFormat.TIFF.value:
            # TIFF-Optionen
            multipage_var = tk.BooleanVar(value=self.format_params.get('multipage', True))
-           ttk.Checkbutton(self.format_options_frame, text="Mehrseitiges TIFF", 
+           multipage_check = ttk.Checkbutton(self.format_options_frame, text="Mehrseitiges TIFF", 
                           variable=multipage_var,
-                          command=lambda: self.format_params.update({'multipage': multipage_var.get()})).pack(anchor=tk.W)
+                          command=lambda: self.format_params.update({'multipage': multipage_var.get()}))
+           multipage_check.pack(anchor=tk.W)
+           
+           # WICHTIG: Initialen Wert sofort speichern!
+           self.format_params['multipage'] = multipage_var.get()
    
    def _browse_path(self):
        """Öffnet Dialog zur Auswahl des Export-Pfads"""
@@ -865,6 +880,11 @@ class ExportEditDialog:
            self.email_body_text.delete("1.0", tk.END)
            self.email_body_text.insert("1.0", result)
    
+   def _validate_email(self, email: str) -> bool:
+       """Validiert eine E-Mail-Adresse"""
+       pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+       return re.match(pattern, email.strip()) is not None
+   
    def _validate(self) -> bool:
        """Validiert die Eingaben"""
        # Name prüfen
@@ -886,8 +906,15 @@ class ExportEditDialog:
                
        elif method == ExportMethod.EMAIL.value:
            # E-Mail-Empfänger prüfen
-           if not self.email_recipient_var.get().strip():
+           recipient = self.email_recipient_var.get().strip()
+           if not recipient:
                messagebox.showerror("Fehler", "Bitte geben Sie einen E-Mail-Empfänger ein.")
+               self.email_recipient_entry.focus()
+               return False
+           
+           # Validiere E-Mail-Format nur wenn keine Variable verwendet wird
+           if '<' not in recipient and not self._validate_email(recipient):
+               messagebox.showerror("Fehler", "Bitte geben Sie eine gültige E-Mail-Adresse ein.")
                self.email_recipient_entry.focus()
                return False
            

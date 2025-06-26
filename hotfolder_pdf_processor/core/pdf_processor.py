@@ -179,6 +179,34 @@ class PDFProcessor:
             logger.exception(f"Fehler bei der Dokumentverarbeitung: {e}")
             success = False
             
+            # Verschiebe fehlerhafte Dateien in den Fehlerordner
+            try:
+                # Bestimme Fehlerordner
+                error_path = None
+                if hasattr(hotfolder, 'error_path') and hotfolder.error_path:
+                    error_path = hotfolder.error_path
+                else:
+                    # Verwende Standard-Fehlerordner aus Export-Processor
+                    error_path = self.export_processor.get_error_path("", context if 'context' in locals() else {})
+                
+                if error_path:
+                    os.makedirs(error_path, exist_ok=True)
+                    
+                    # Verschiebe PDF
+                    error_pdf_path = os.path.join(error_path, os.path.basename(doc_pair.pdf_path))
+                    if os.path.exists(doc_pair.pdf_path):
+                        shutil.move(doc_pair.pdf_path, error_pdf_path)
+                        logger.info(f"Fehlerhafte PDF verschoben nach: {error_pdf_path}")
+                    
+                    # Verschiebe XML falls vorhanden
+                    if doc_pair.xml_path and os.path.exists(doc_pair.xml_path):
+                        error_xml_path = os.path.join(error_path, os.path.basename(doc_pair.xml_path))
+                        shutil.move(doc_pair.xml_path, error_xml_path)
+                        logger.info(f"Zugehörige XML verschoben nach: {error_xml_path}")
+                        
+            except Exception as move_error:
+                logger.error(f"Konnte fehlerhafte Dateien nicht verschieben: {move_error}")
+            
         finally:
             # Aufräumen: Lösche temporären Arbeitsordner
             try:
@@ -571,3 +599,21 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"Fehler bei PDF/A-Konvertierung: {e}")
             return False
+            
+    def cleanup_temp_dir(self):
+        """Räumt temporäre Dateien auf"""
+        try:
+            if hasattr(self, 'temp_base_dir') and os.path.exists(self.temp_base_dir):
+                # Lösche nur alte Dateien (älter als 1 Stunde)
+                import time
+                current_time = time.time()
+                for root, dirs, files in os.walk(self.temp_base_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        if current_time - os.path.getmtime(file_path) > 3600:
+                            try:
+                                os.remove(file_path)
+                            except:
+                                pass
+        except Exception as e:
+            logger.warning(f"Fehler beim Aufräumen: {e}")

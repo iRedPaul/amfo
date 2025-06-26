@@ -271,6 +271,7 @@ class FunctionParser:
     # Datumsfunktionen
     def _formatdate(self, format_string: str) -> str:
         """FORMATDATE Funktion - KORRIGIERT und vereinfacht"""
+        now = datetime.now()
         try:
             if not self._validate_date_format(format_string):
                 return datetime.now().strftime("%d.%m.%Y")

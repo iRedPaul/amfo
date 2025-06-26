@@ -8,6 +8,7 @@ from typing import Dict, Any
 from pathlib import Path
 import msvcrt
 import errno
+import time
 import logging
 
 # Logger für dieses Modul
@@ -113,8 +114,6 @@ class CounterManager:
                         break
                     except IOError:
                         time.sleep(0.01)  # Kurz warten und erneut versuchen
-            else:  # Unix/Linux
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             
             with self._lock:  # Thread-Lock für Thread-Sicherheit
                 # Lade Counter neu vom Disk (für Prozess-Sicherheit)

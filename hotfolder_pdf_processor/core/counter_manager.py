@@ -230,19 +230,19 @@ class CounterManager:
             logger.debug(f"Alle Counter abgefragt: {len(self.counters)} Counter")
             return self.counters.copy()
     
-def clear_all_counters(self) -> None:
-    """Löscht alle Counter"""
-    with self._lock:
-        count = len(self.counters)
-        
-        # Strukturiertes Logging vor dem Löschen
-        logger.warning("Alle Counter werden gelöscht", extra={
-            'counter_count': count,
-            'counters': list(self.counters.keys())
-        })
-        
-        self.counters.clear()
-        self.save_counters()
+    def clear_all_counters(self) -> None:
+        """Löscht alle Counter"""
+        with self._lock:
+            count = len(self.counters)
+            
+            # Strukturiertes Logging vor dem Löschen
+            logger.warning("Alle Counter werden gelöscht", extra={
+                'counter_count': count,
+                'counters': list(self.counters.keys())
+            })
+            
+            self.counters.clear()
+            self.save_counters()
 
 
 # Globale Instanz für die Anwendung

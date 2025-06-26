@@ -49,7 +49,7 @@ class HotfolderConfig:
     description: str = ""  # Neues Feld für Beschreibung
     process_pairs: bool = True  # PDF + XML Paare verarbeiten
     actions: List[ProcessingAction] = field(default_factory=list)
-    action_params: Dict[str, any] = field(default_factory=dict)
+    action_params: Dict[str, Any] = field(default_factory=dict)
     file_patterns: List[str] = field(default_factory=lambda: ["*.pdf"])
     xml_field_mappings: List[Dict[str, Any]] = field(default_factory=list)
     output_filename_expression: str = "<FileName>"  # Neuer Export-Dateiname Ausdruck

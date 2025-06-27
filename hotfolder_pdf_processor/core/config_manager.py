@@ -1,26 +1,86 @@
-"""
-Vereinheitlichter Manager für Konfiguration, Einstellungen und Zähler
-"""
 import json
 import os
-from typing import List, Optional, Dict, Any
 import logging
 import threading
-import sys
-
-# Füge das Hauptverzeichnis zum Python-Pfad hinzu
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from models.hotfolder_config import HotfolderConfig
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass, field, asdict
+import uuid
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExportConfig:
+    """Konfiguration für einen Export"""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = ""
+    enabled: bool = True
+    export_method: str = "file"  # file, email, ftp, etc.
+    export_format: str = "searchable_pdf_a"
+    export_path_expression: str = ""
+    export_filename_expression: str = "<FileName>"
+    format_params: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ExportConfig':
+        return cls(**data)
+
+
+@dataclass
+class HotfolderConfig:
+    """Konfiguration für einen Hotfolder"""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = ""
+    enabled: bool = True
+    description: str = ""
+    
+    # Paths
+    input_path: str = ""
+    output_path: str = ""
+    error_path: str = ""
+    
+    # Processing
+    process_pairs: bool = False
+    file_patterns: List[str] = field(default_factory=lambda: ["*.pdf"])
+    output_filename_expression: str = "<FileName>"
+    
+    # OCR
+    ocr_zones: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Fields
+    xml_field_mappings: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Actions
+    actions: List[str] = field(default_factory=list)
+    action_params: Dict[str, Any] = field(default_factory=dict)
+    
+    # Exports
+    export_configs: List[ExportConfig] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data['export_configs'] = [ec.to_dict() for ec in self.export_configs]
+        return data
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'HotfolderConfig':
+        export_configs = data.pop('export_configs', [])
+        hotfolder = cls(**data)
+        hotfolder.export_configs = [ExportConfig.from_dict(ec) for ec in export_configs]
+        return hotfolder
 
 
 class ConfigManager:
     """Verwaltet die Konfiguration der Anwendung"""
     
-    def __init__(self, config_file: str = "config.json"):
-        self.config_file = config_file
+    DEFAULT_CONFIG_FILE = "hotfolders.json"
+    
+    def __init__(self, config_file: str = None):
+        self.config_file = config_file or self.DEFAULT_CONFIG_FILE
         self.hotfolders: List[HotfolderConfig] = []
         self.load_config()
     
@@ -34,37 +94,89 @@ class ConfigManager:
         
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-                if not content.strip():
-                    logger.warning("Konfigurationsdatei ist leer, initialisiere mit leerer Konfiguration")
-                    self.create_default_config()
-                    self.save_config()
-                    return
-                    
-                data = json.loads(content)
+                data = json.load(f)
             
-            # Lade Hotfolders
+            # Lade Hotfolder mit neuer Struktur
             self.hotfolders = []
-            for hf_data in data.get("hotfolders", []):
-                hotfolder_dict = self._convert_from_storage(hf_data)
-                self.hotfolders.append(HotfolderConfig.from_dict(hotfolder_dict))
+            for hf_data in data.get('hotfolders', []):
+                # Konvertiere von alter zu neuer Struktur falls nötig
+                converted_data = self._convert_from_storage(hf_data)
+                hotfolder = HotfolderConfig.from_dict(converted_data)
+                self.hotfolders.append(hotfolder)
             
-            logger.info(f"Konfiguration geladen: {len(self.hotfolders)} Hotfolder")
+            logger.info(f"{len(self.hotfolders)} Hotfolder geladen")
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Fehler beim Laden der Konfiguration (JSON ungültig): {e}")
-            self.create_default_config()
-            self.save_config()
         except Exception as e:
             logger.exception(f"Fehler beim Laden der Konfiguration: {e}")
-            self.hotfolders = []
+            self.create_default_config()
     
     def create_default_config(self):
         """Erstellt eine Standard-Konfiguration"""
         self.hotfolders = []
     
+    def save_config(self) -> None:
+        """Speichert die Konfiguration in die Datei"""
+        data = {
+            'version': '2.0',
+            'hotfolders': []
+        }
+        
+        for hotfolder in self.hotfolders:
+            # Konvertiere zur Speicherstruktur
+            hf_storage = self._convert_to_storage(hotfolder)
+            data['hotfolders'].append(hf_storage)
+        
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            logger.info("Konfiguration gespeichert")
+        except Exception as e:
+            logger.error(f"Fehler beim Speichern der Konfiguration: {e}")
+    
+    def add_hotfolder(self, hotfolder: HotfolderConfig) -> None:
+        """Fügt einen neuen Hotfolder hinzu"""
+        self.hotfolders.append(hotfolder)
+        self.save_config()
+        logger.info(f"Hotfolder '{hotfolder.name}' hinzugefügt")
+    
+    def update_hotfolder(self, hotfolder_id: str, updated_hotfolder: HotfolderConfig) -> None:
+        """Aktualisiert einen bestehenden Hotfolder"""
+        for i, hf in enumerate(self.hotfolders):
+            if hf.id == hotfolder_id:
+                self.hotfolders[i] = updated_hotfolder
+                self.save_config()
+                logger.info(f"Hotfolder '{updated_hotfolder.name}' aktualisiert")
+                return
+        logger.warning(f"Hotfolder mit ID {hotfolder_id} nicht gefunden")
+    
+    def delete_hotfolder(self, hotfolder_id: str) -> None:
+        """Löscht einen Hotfolder"""
+        self.hotfolders = [hf for hf in self.hotfolders if hf.id != hotfolder_id]
+        self.save_config()
+        logger.info(f"Hotfolder mit ID {hotfolder_id} gelöscht")
+    
+    def get_hotfolder(self, hotfolder_id: str) -> Optional[HotfolderConfig]:
+        """Gibt einen spezifischen Hotfolder zurück"""
+        for hf in self.hotfolders:
+            if hf.id == hotfolder_id:
+                return hf
+        return None
+    
+    def get_hotfolders(self) -> List[HotfolderConfig]:
+        """Gibt alle Hotfolder zurück"""
+        return self.hotfolders
+    
+    def get_enabled_hotfolders(self) -> List[HotfolderConfig]:
+        """Gibt nur die aktivierten Hotfolder zurück"""
+        return [hf for hf in self.hotfolders if hf.enabled]
+    
     def _convert_from_storage(self, stored_hf: Dict[str, Any]) -> Dict[str, Any]:
-        """Konvertiert von gespeicherter Struktur zur internen HotfolderConfig-Struktur"""
+        """Konvertiert von der gespeicherten Struktur zu HotfolderConfig"""
+        # Prüfe ob es bereits die neue Struktur ist
+        if "input_path" in stored_hf:
+            return stored_hf
+        
+        # Konvertiere alte Struktur
         return {
             "id": stored_hf.get("id"),
             "name": stored_hf.get("name"),
@@ -158,84 +270,6 @@ class ConfigManager:
                 for export in hf_dict.get("export_configs", [])
             ]
         }
-    
-    def save_config(self) -> None:
-        """Speichert die Konfiguration in die Datei"""
-        data = {
-            "hotfolders": [
-                self._convert_to_storage(hf) 
-                for hf in self.hotfolders
-            ]
-        }
-        
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            logger.debug(f"Konfiguration gespeichert: {len(self.hotfolders)} Hotfolder")
-        except Exception as e:
-            logger.error(f"Fehler beim Speichern der Konfiguration: {e}")
-    
-    def add_hotfolder(self, hotfolder: HotfolderConfig) -> None:
-        """Fügt einen neuen Hotfolder hinzu"""
-        self.hotfolders.append(hotfolder)
-        logger.info(f"Hotfolder hinzugefügt: {hotfolder.name}")
-        self.save_config()
-    
-    def update_hotfolder(self, hotfolder: HotfolderConfig) -> None:
-        """Aktualisiert einen bestehenden Hotfolder"""
-        for i, hf in enumerate(self.hotfolders):
-            if hf.id == hotfolder.id:
-                self.hotfolders[i] = hotfolder
-                logger.info(f"Hotfolder aktualisiert: {hotfolder.name}")
-                self.save_config()
-                return
-        logger.warning(f"Hotfolder mit ID {hotfolder.id} nicht gefunden")
-    
-    def delete_hotfolder(self, hotfolder_id: str) -> None:
-        """Löscht einen Hotfolder"""
-        initial_count = len(self.hotfolders)
-        self.hotfolders = [hf for hf in self.hotfolders if hf.id != hotfolder_id]
-        
-        if len(self.hotfolders) < initial_count:
-            logger.info(f"Hotfolder mit ID {hotfolder_id} gelöscht")
-            self.save_config()
-        else:
-            logger.warning(f"Hotfolder mit ID {hotfolder_id} nicht gefunden")
-    
-    def get_hotfolder(self, hotfolder_id: str) -> Optional[HotfolderConfig]:
-        """Gibt einen spezifischen Hotfolder zurück"""
-        for hf in self.hotfolders:
-            if hf.id == hotfolder_id:
-                return hf
-        logger.debug(f"Hotfolder mit ID {hotfolder_id} nicht gefunden")
-        return None
-    
-    def get_enabled_hotfolders(self) -> List[HotfolderConfig]:
-        """Gibt alle aktivierten Hotfolder zurück"""
-        enabled = [hf for hf in self.hotfolders if hf.enabled]
-        logger.debug(f"{len(enabled)} von {len(self.hotfolders)} Hotfoldern sind aktiviert")
-        return enabled
-    
-    def validate_paths(self, hotfolder: HotfolderConfig) -> tuple[bool, str]:
-        """Validiert die Pfade eines Hotfolders"""
-        # Prüfe Input-Pfad
-        if not os.path.exists(hotfolder.input_path):
-            try:
-                os.makedirs(hotfolder.input_path, exist_ok=True)
-                logger.info(f"Input-Pfad erstellt: {hotfolder.input_path}")
-            except Exception as e:
-                return False, f"Input-Pfad konnte nicht erstellt werden: {e}"
-        
-        # Prüfe Output-Pfad (falls verschieden von Input)
-        if hotfolder.output_path and hotfolder.output_path != hotfolder.input_path:
-            if not os.path.exists(hotfolder.output_path):
-                try:
-                    os.makedirs(hotfolder.output_path, exist_ok=True)
-                    logger.info(f"Output-Pfad erstellt: {hotfolder.output_path}")
-                except Exception as e:
-                    return False, f"Output-Pfad konnte nicht erstellt werden: {e}"
-        
-        return True, "Pfade sind gültig"
 
 
 class SettingsManager:
@@ -247,10 +281,6 @@ class SettingsManager:
         self.settings_file = settings_file or self.DEFAULT_SETTINGS_FILE
         self.paths: Dict[str, str] = {}
         self.smtp: Dict[str, Any] = {}
-        self.processing: Dict[str, Any] = {}
-        self.ui: Dict[str, Any] = {}
-        self.logging_config: Dict[str, Any] = {}
-        
         self.load_settings()
     
     def load_settings(self) -> None:
@@ -263,56 +293,29 @@ class SettingsManager:
         
         try:
             with open(self.settings_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-                if not content.strip():
-                    logger.warning("Einstellungsdatei ist leer, initialisiere mit Standardeinstellungen")
-                    self.create_default_settings()
-                    self.save_settings()
-                    return
-                
-                data = json.loads(content)
+                data = json.load(f)
             
-            # Lade alle Bereiche
-            self.paths = data.get("paths", self._get_default_paths())
+            # Lade Pfade
+            self.paths = data.get("paths", {})
+            
+            # Lade SMTP-Einstellungen
             self.smtp = data.get("smtp", self._get_default_smtp())
-            self.processing = data.get("processing", self._get_default_processing())
-            self.ui = data.get("ui", self._get_default_ui())
-            self.logging_config = data.get("logging", self._get_default_logging())
             
             logger.info("Einstellungen geladen")
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Fehler beim Laden der Einstellungen (JSON ungültig): {e}")
-            self.create_default_settings()
-            self.save_settings()
         except Exception as e:
             logger.exception(f"Fehler beim Laden der Einstellungen: {e}")
             self.create_default_settings()
     
     def create_default_settings(self):
-        """Erstellt Standardeinstellungen"""
-        self.paths = self._get_default_paths()
-        self.smtp = self._get_default_smtp()
-        self.processing = self._get_default_processing()
-        self.ui = self._get_default_ui()
-        self.logging_config = self._get_default_logging()
-    
-    def _get_default_paths(self) -> Dict[str, str]:
-        """Gibt Standard-Pfade zurück"""
-        appdata = os.getenv('APPDATA')
-        if appdata:
-            default_error_path = os.path.join(appdata, 'HotfolderPDFProcessor', 'errors')
-        else:
-            default_error_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'errors')
-        
-        os.makedirs(default_error_path, exist_ok=True)
-        
-        return {
-            "default_error": default_error_path
+        """Erstellt Standard-Einstellungen"""
+        self.paths = {
+            "default_error": ""
         }
+        self.smtp = self._get_default_smtp()
     
     def _get_default_smtp(self) -> Dict[str, Any]:
-        """Gibt Standard-SMTP-Einstellungen zurück"""
+        """Gibt die Standard-SMTP-Konfiguration zurück"""
         return {
             "server": {
                 "host": "",
@@ -321,54 +324,26 @@ class SettingsManager:
                 "use_tls": True
             },
             "auth": {
-                "method": "basic",
+                "method": "basic",  # basic, oauth2
                 "basic": {
                     "username": "",
                     "password": "",
                     "from_address": ""
                 },
                 "oauth2": {
-                    "provider": "",
                     "client_id": "",
                     "client_secret": "",
-                    "refresh_token": "",
-                    "access_token": "",
-                    "token_expiry": ""
+                    "tenant_id": "",
+                    "from_address": ""
                 }
             }
-        }
-    
-    def _get_default_processing(self) -> Dict[str, Any]:
-        """Gibt Standard-Verarbeitungseinstellungen zurück"""
-        return {
-            "defaults": {},
-            "limits": {}
-        }
-    
-    def _get_default_ui(self) -> Dict[str, Any]:
-        """Gibt Standard-UI-Einstellungen zurück"""
-        return {
-            "preferences": {},
-            "recent": {}
-        }
-    
-    def _get_default_logging(self) -> Dict[str, Any]:
-        """Gibt Standard-Logging-Einstellungen zurück"""
-        return {
-            "level": "INFO",
-            "path": None,
-            "max_size": None,
-            "keep_days": None
         }
     
     def save_settings(self) -> None:
         """Speichert die Einstellungen in die Datei"""
         data = {
             "paths": self.paths,
-            "smtp": self.smtp,
-            "processing": self.processing,
-            "ui": self.ui,
-            "logging": self.logging_config
+            "smtp": self.smtp
         }
         
         try:
@@ -543,9 +518,9 @@ class CounterManager:
             
             logger.debug(f"Zähler {category}/{name} gesetzt: {old_value} -> {value}")
     
-    def reset_counter(self, name: str, category: str = "auto") -> None:
-        """Setzt einen Zähler auf 0 zurück"""
-        self.set_counter(name, 0, category)
+    def reset_counter(self, name: str, value: int = 0, category: str = "auto") -> None:
+        """Setzt einen Zähler auf einen bestimmten Wert zurück (Standard: 0)"""
+        self.set_counter(name, value, category)
     
     def delete_counter(self, name: str, category: str = "auto") -> None:
         """Löscht einen Zähler"""
@@ -576,6 +551,50 @@ class CounterManager:
             return self.increment_counter(name, "auto", increment)
         else:
             return self.increment_counter(f"auto_{name}", "auto", increment)
+    
+    def get_and_increment(self, counter_name: str, start_value: int = 1, step: int = 1) -> int:
+        """
+        Gibt den aktuellen Wert eines Zählers zurück und erhöht ihn.
+        Wenn der Zähler nicht existiert, wird er mit start_value initialisiert.
+        """
+        with self._lock:
+            category = "auto"
+            
+            # Stelle sicher, dass die Kategorie existiert
+            if category not in self.counters:
+                self.counters[category] = {}
+            
+            # Hole aktuellen Wert oder initialisiere mit start_value
+            current_value = self.counters[category].get(counter_name, None)
+            if current_value is None:
+                # Zähler existiert nicht, initialisiere mit start_value
+                current_value = start_value
+            else:
+                # Zähler existiert, gib aktuellen Wert zurück
+                pass
+            
+            # Erhöhe den Zähler für den nächsten Aufruf
+            new_value = current_value + step
+            self.counters[category][counter_name] = new_value
+            
+            # Speichere nach jeder Änderung
+            self.save_counters()
+            
+            logger.debug(f"Zähler {category}/{counter_name}: {current_value} zurückgegeben, nächster Wert: {new_value}")
+            return current_value
+    
+    def list_counters(self, category: str = "auto") -> Dict[str, int]:
+        """Listet alle Zähler in einer Kategorie auf"""
+        with self._lock:
+            return self.counters.get(category, {}).copy()
+    
+    def clear_all_counters(self, category: str = "auto") -> None:
+        """Löscht alle Zähler in einer Kategorie"""
+        with self._lock:
+            if category in self.counters:
+                self.counters[category] = {}
+                self.save_counters()
+                logger.info(f"Alle Zähler in Kategorie '{category}' gelöscht")
 
 
 # Globale Instanzen für einfachen Zugriff

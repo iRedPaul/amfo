@@ -101,17 +101,33 @@ class PDFProcessor:
                 # Baue Kontext für XML-Verarbeitung auf
                 context = self._build_context(temp_pdf, temp_xml, hotfolder)
                 
-                # Verarbeite XML
-                xml_tree = self.xml_processor.process_xml(
+                # Konvertiere FieldMapping Dictionaries zu FieldMapping Objekten
+                field_mappings = []
+                for mapping_dict in hotfolder.xml_field_mappings:
+                    field_mappings.append(FieldMapping.from_dict(mapping_dict))
+                
+                # Konvertiere OCR-Zonen zu Dict-Format für XML-Processor
+                ocr_zones_dict = []
+                for zone in hotfolder.ocr_zones:
+                    ocr_zones_dict.append({
+                        'name': zone.name,
+                        'zone': zone.zone,
+                        'page_num': zone.page_num
+                    })
+                
+                # Verarbeite XML - KORREKTUR: Verwende process_xml_with_mappings
+                success = self.xml_processor.process_xml_with_mappings(
                     temp_xml,
-                    hotfolder.xml_field_mappings,
-                    context
+                    temp_pdf,
+                    field_mappings,
+                    ocr_zones_dict
                 )
                 
-                if xml_tree:
-                    # Speichere modifizierte XML
-                    xml_tree.write(temp_xml, encoding='utf-8', xml_declaration=True)
+                if success:
                     logger.info("XML-Felder erfolgreich verarbeitet")
+                else:
+                    logger.error("Fehler bei XML-Feldverarbeitung")
+                    return False
             
             # Exportiere Dateien
             if hotfolder.export_configs:
@@ -120,11 +136,20 @@ class PDFProcessor:
                 # Baue Export-Kontext auf
                 context = self._build_context(temp_pdf, temp_xml, hotfolder)
                 
+                # Konvertiere OCR-Zonen zu Dict-Format für Export-Processor
+                ocr_zones_dict = []
+                for zone in hotfolder.ocr_zones:
+                    ocr_zones_dict.append({
+                        'name': zone.name,
+                        'zone': zone.zone,
+                        'page_num': zone.page_num
+                    })
+                
                 # Exportiere
                 export_results = self.export_processor.process_exports(
                     temp_pdf, temp_xml,
                     hotfolder.export_configs,
-                    hotfolder.ocr_zones,
+                    ocr_zones_dict,
                     hotfolder.xml_field_mappings
                 )
                 
@@ -242,7 +267,8 @@ class PDFProcessor:
         # OCR-Zonen verarbeiten wenn definiert
         if hotfolder.ocr_zones:
             for zone in hotfolder.ocr_zones:
-                zone_name = zone.get('name', 'Unnamed')
+                # KORREKTUR: Verwende direkte Attribute statt .get()
+                zone_name = zone.name
                 
                 # Prüfe Cache
                 cache_key = f"{pdf_path}:{zone_name}"
@@ -252,8 +278,8 @@ class PDFProcessor:
                     # Führe OCR aus
                     text = self.ocr_processor.extract_text_from_zone(
                         pdf_path,
-                        zone.get('zone', [0, 0, 100, 100]),
-                        zone.get('page_num', 1)
+                        zone.page_num,
+                        zone.zone  # tuple mit (x, y, width, height)
                     )
                     context[zone_name] = text.strip()
                     self._zone_cache[cache_key] = context[zone_name]
@@ -332,69 +358,43 @@ class PDFProcessor:
     def _is_ghostscript_available(self) -> bool:
         """Prüft ob Ghostscript verfügbar ist"""
         try:
-            # Windows
-            if os.name == 'nt':
-                # Versuche 64-bit Version
-                try:
-                    result = subprocess.run(['gswin64c', '--version'], 
-                                          capture_output=True, text=True)
-                    if result.returncode == 0:
-                        return True
-                except:
-                    pass
-                
-                # Versuche 32-bit Version
-                try:
-                    result = subprocess.run(['gswin32c', '--version'], 
-                                          capture_output=True, text=True)
-                    if result.returncode == 0:
-                        return True
-                except:
-                    pass
-                
-                return False
-            else:
-                # Unix/Linux
-                result = subprocess.run(['gs', '--version'], 
-                                      capture_output=True, text=True)
-                return result.returncode == 0
+            gs_command = 'gswin64c' if os.name == 'nt' else 'gs'
+            result = subprocess.run([gs_command, '--version'], capture_output=True, text=True)
+            return result.returncode == 0
         except:
-            return False
-            
-    def _get_gs_command(self) -> Optional[str]:
-            """Ermittelt den Ghostscript-Befehl für das aktuelle Betriebssystem"""
+            # Versuche alternative Befehle auf Windows
             if os.name == 'nt':
-                # Windows: Versuche beide Versionen
-                for cmd in ['gswin64c', 'gswin32c']:
-                    try:
-                        result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return cmd
-                    except:
-                        continue
-            else:
-                # Unix/Linux
                 try:
-                    result = subprocess.run(['gs', '--version'], capture_output=True, text=True)
-                    if result.returncode == 0:
-                        return 'gs'
+                    result = subprocess.run(['gswin32c', '--version'], capture_output=True, text=True)
+                    return result.returncode == 0
                 except:
                     pass
-            return None
-            
+            return False
+    
     def _compress_with_ghostscript(self, pdf_path: str, params: Dict[str, Any]) -> bool:
-        """Komprimiert PDF mit Ghostscript"""
+        """Komprimiert PDF mit Ghostscript und erweiterten Parametern"""
         try:
-            # Bestimme Ghostscript-Befehl
-            gs_cmd = self._get_gs_command()
-            if not gs_cmd:
-                raise Exception("Ghostscript nicht gefunden")
+            # Standard-Parameter
+            compression_level = params.get('compression_level', 'Mittel - Ausgewogen')
             
-            # Hole Parameter
-            color_dpi = params.get('color_dpi', 150)
-            gray_dpi = params.get('gray_dpi', 150)
-            mono_dpi = params.get('mono_dpi', 150)
-            jpeg_quality = params.get('jpeg_quality', 85)
+            # DPI-Einstellungen basierend auf Komprimierungslevel
+            if compression_level == 'Niedrig - Beste Qualität':
+                color_dpi = params.get('color_dpi', 300)
+                gray_dpi = params.get('gray_dpi', 300)
+                mono_dpi = params.get('mono_dpi', 300)
+                jpeg_quality = params.get('jpeg_quality', 95)
+            elif compression_level == 'Hoch - Kleine Dateigröße':
+                color_dpi = params.get('color_dpi', 72)
+                gray_dpi = params.get('gray_dpi', 72)
+                mono_dpi = params.get('mono_dpi', 150)
+                jpeg_quality = params.get('jpeg_quality', 75)
+            else:  # Mittel
+                color_dpi = params.get('color_dpi', 150)
+                gray_dpi = params.get('gray_dpi', 150)
+                mono_dpi = params.get('mono_dpi', 300)
+                jpeg_quality = params.get('jpeg_quality', 85)
+            
+            # Weitere Parameter aus den erweiterten Einstellungen
             color_compression = params.get('color_compression', 'jpeg')
             gray_compression = params.get('gray_compression', 'jpeg')
             mono_compression = params.get('mono_compression', 'ccitt')
@@ -403,104 +403,105 @@ class PDFProcessor:
             remove_duplicates = params.get('remove_duplicates', True)
             optimize = params.get('optimize', True)
             
-            # Temporäre Ausgabedatei
-            temp_output = pdf_path + '.gs_compressed'
+            # Temporäre Ausgabedatei mit sicherem Namen
+            temp_output = os.path.join(
+                os.path.dirname(pdf_path),
+                f"temp_{uuid.uuid4().hex}_{os.path.basename(pdf_path)}"
+            )
             
-            # Stelle sicher, dass Pfade sicher sind
-            import shlex
-            if os.name != 'nt':
-                # Unix: Shell-Escape für Sicherheit
-                temp_output_safe = shlex.quote(temp_output)
-                pdf_path_safe = shlex.quote(pdf_path)
+            # Pfade für Windows anpassen
+            if os.name == 'nt':
+                # Ersetze Backslashes und umgebe mit Anführungszeichen bei Leerzeichen
+                pdf_path_safe = pdf_path.replace('\\', '/')
+                temp_output_safe = temp_output.replace('\\', '/')
             else:
-                # Windows: Keine Shell-Escapes nötig bei Liste
-                temp_output_safe = temp_output
                 pdf_path_safe = pdf_path
+                temp_output_safe = temp_output
             
-            # Ghostscript-Befehl als Liste zusammenbauen
+            # Ghostscript-Befehl
+            gs_command = 'gswin64c' if os.name == 'nt' else 'gs'
+            
+            # Basis-Befehl
             cmd = [
-                gs_cmd,
+                gs_command,
                 '-sDEVICE=pdfwrite',
-                '-dCompatibilityLevel=1.4',
+                '-dCompatibilityLevel=1.5',
                 '-dNOPAUSE',
-                '-dBATCH',
                 '-dQUIET',
-                f'-dColorImageResolution={int(color_dpi)}',
-                f'-dGrayImageResolution={int(gray_dpi)}',
-                f'-dMonoImageResolution={int(mono_dpi)}'
+                '-dBATCH',
+                '-dSAFER',
             ]
             
-            # Downsampling
+            # Downsampling-Einstellungen
             if downsample_images:
                 cmd.extend([
                     '-dDownsampleColorImages=true',
                     '-dDownsampleGrayImages=true',
                     '-dDownsampleMonoImages=true',
+                    f'-dColorImageResolution={color_dpi}',
+                    f'-dGrayImageResolution={gray_dpi}',
+                    f'-dMonoImageResolution={mono_dpi}',
                     '-dColorImageDownsampleType=/Bicubic',
                     '-dGrayImageDownsampleType=/Bicubic',
-                    '-dMonoImageDownsampleType=/Subsample'
+                    '-dMonoImageDownsampleType=/Bicubic',
                 ])
             else:
                 cmd.extend([
                     '-dDownsampleColorImages=false',
                     '-dDownsampleGrayImages=false',
-                    '-dDownsampleMonoImages=false'
+                    '-dDownsampleMonoImages=false',
                 ])
             
-            # Komprimierungsmethoden für Farbbilder
+            # Kompressions-Einstellungen für Farbbilder
             if color_compression == 'jpeg':
                 cmd.extend([
                     '-dAutoFilterColorImages=false',
                     '-dColorImageFilter=/DCTEncode',
+                    '-dEncodeColorImages=true',
                     f'-dJPEGQ={jpeg_quality/100.0:.2f}'
-                ])
-            elif color_compression == 'jpeg2000':
-                cmd.extend([
-                    '-dAutoFilterColorImages=false',
-                    '-dColorImageFilter=/JPXEncode'
                 ])
             elif color_compression == 'zip':
                 cmd.extend([
                     '-dAutoFilterColorImages=false',
-                    '-dColorImageFilter=/FlateEncode'
+                    '-dColorImageFilter=/FlateEncode',
+                    '-dEncodeColorImages=true'
                 ])
             elif color_compression == 'none':
                 cmd.extend([
-                    '-dAutoFilterColorImages=false',
                     '-dEncodeColorImages=false'
                 ])
             
-            # Komprimierungsmethoden für Graustufenbilder
+            # Kompressions-Einstellungen für Graustufenbilder
             if gray_compression == 'jpeg':
                 cmd.extend([
                     '-dAutoFilterGrayImages=false',
-                    '-dGrayImageFilter=/DCTEncode'
-                ])
-            elif gray_compression == 'jpeg2000':
-                cmd.extend([
-                    '-dAutoFilterGrayImages=false',
-                    '-dGrayImageFilter=/JPXEncode'
+                    '-dGrayImageFilter=/DCTEncode',
+                    '-dEncodeGrayImages=true'
                 ])
             elif gray_compression == 'zip':
                 cmd.extend([
                     '-dAutoFilterGrayImages=false',
-                    '-dGrayImageFilter=/FlateEncode'
+                    '-dGrayImageFilter=/FlateEncode',
+                    '-dEncodeGrayImages=true'
                 ])
             elif gray_compression == 'none':
                 cmd.extend([
-                    '-dAutoFilterGrayImages=false',
                     '-dEncodeGrayImages=false'
                 ])
             
-            # Komprimierungsmethoden für Schwarz-Weiß-Bilder
+            # Kompressions-Einstellungen für S/W-Bilder
             if mono_compression == 'ccitt':
                 cmd.extend([
-                    '-dMonoImageFilter=/CCITTFaxEncode'
+                    '-dMonoImageFilter=/CCITTFaxEncode',
+                    '-dEncodeMonoImages=true'
                 ])
             elif mono_compression == 'jbig2':
-                # JBIG2 ist nicht in allen Ghostscript-Versionen verfügbar
-                # Fallback zu CCITT wenn JBIG2 fehlschlägt
-                logger.info("Hinweis: JBIG2 wird versucht, Fallback zu CCITT falls nicht verfügbar")
+                # JBIG2 nur wenn verfügbar, sonst Fallback auf CCITT
+                cmd.extend([
+                    '-dMonoImageFilter=/JBIG2Encode',
+                    '-dEncodeMonoImages=true'
+                ])
+                # Füge Fallback hinzu
                 cmd.extend([
                     '-dMonoImageFilter=/CCITTFaxEncode'  # Sicherer Fallback
                 ])

@@ -360,7 +360,28 @@ class PDFProcessor:
                 return result.returncode == 0
         except:
             return False
-    
+            
+    def _get_gs_command(self) -> Optional[str]:
+            """Ermittelt den Ghostscript-Befehl für das aktuelle Betriebssystem"""
+            if os.name == 'nt':
+                # Windows: Versuche beide Versionen
+                for cmd in ['gswin64c', 'gswin32c']:
+                    try:
+                        result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return cmd
+                    except:
+                        continue
+            else:
+                # Unix/Linux
+                try:
+                    result = subprocess.run(['gs', '--version'], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        return 'gs'
+                except:
+                    pass
+            return None
+            
     def _compress_with_ghostscript(self, pdf_path: str, params: Dict[str, Any]) -> bool:
         """Komprimiert PDF mit Ghostscript"""
         try:

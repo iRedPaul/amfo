@@ -1,0 +1,127 @@
+{
+  "version": "1.0.0",
+  "hotfolders": [
+    {
+      "id": "b4ae150d-3db4-47ba-8304-714eeeebeb04",
+      "name": "Test Hotfolder",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "",
+      "paths": {
+        "input": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Input",
+        "output": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Input",
+        "error": ""
+      },
+      "processing": {
+        "process_pairs": true,
+        "file_patterns": [
+          "*.pdf"
+        ],
+        "output_filename_expression": "<FileName>"
+      },
+      "ocr": {
+        "zones": [
+          {
+            "name": "Nummer",
+            "zone": [
+              1904,
+              732,
+              258,
+              116
+            ],
+            "page_num": 1
+          },
+          {
+            "name": "Firma",
+            "zone": [
+              200,
+              734,
+              746,
+              244
+            ],
+            "page_num": 1
+          }
+        ]
+      },
+      "fields": {
+        "mappings": [
+          {
+            "field_name": "Firma_REGEX",
+            "description": "Blabla",
+            "source_type": "expression",
+            "expression": "<Nummer>",
+            "zone": null,
+            "page_num": 1,
+            "zones": []
+          },
+          {
+            "field_name": "Datum",
+            "description": "",
+            "source_type": "expression",
+            "expression": "FORMATDATE(\"dd-mm-yyyy\")",
+            "zone": null,
+            "page_num": 1,
+            "zones": []
+          },
+          {
+            "field_name": "Counter",
+            "description": "",
+            "source_type": "expression",
+            "expression": "AUTOINCREMENT(\"Counter 1\",1,5)",
+            "zone": null,
+            "page_num": 1,
+            "zones": []
+          }
+        ]
+      },
+      "actions": {
+        "list": [
+          "compress",
+          "split"
+        ],
+        "parameters": {
+          "compress": {
+            "compression_level": "Hoch - Kleine Dateigröße",
+            "color_dpi": 72,
+            "gray_dpi": 72,
+            "mono_dpi": 72,
+            "jpeg_quality": 65,
+            "color_compression": "jpeg",
+            "gray_compression": "jpeg",
+            "mono_compression": "ccitt",
+            "downsample_images": true,
+            "subset_fonts": true,
+            "remove_duplicates": true,
+            "optimize": true
+          }
+        }
+      },
+      "exports": [
+        {
+          "id": "4b86fd8f-d6c2-47a0-a8b9-93f25678aa88",
+          "name": "Export PDF",
+          "enabled": true,
+          "method": "file",
+          "format": "pdf",
+          "paths": {
+            "path_expression": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Output",
+            "filename_expression": "<FileName>"
+          },
+          "format_params": {}
+        }
+      ],
+      "metadata": {
+        "created": "2025-06-26T11:18:09.990902",
+        "modified": "2025-06-26T13:31:00.238348",
+        "last_run": null
+      },
+      "extensions": {}
+    }
+  ],
+  "metadata": {
+    "created": "2025-06-26T11:17:51.657180",
+    "modified": "2025-06-26T13:31:00.237878",
+    "last_migration": null
+  },
+  "extensions": {}
+}

@@ -108,6 +108,87 @@ class ConfigManager:
         if hotfolder.error_path and not os.path.isabs(hotfolder.error_path):
             return False, f"Fehlerpfad ist nicht absolut: {hotfolder.error_path}"
         return True, "Pfade sind gültig"
+    
+    def check_duplicate_input_path(self, input_path: str, exclude_id: Optional[str] = None) -> Optional[str]:
+        """Prüft ob ein Input-Pfad bereits verwendet wird. Gibt den Namen des Hotfolders zurück, der ihn verwendet."""
+        input_norm = os.path.normcase(os.path.abspath(input_path))
+        for hf in self.hotfolders:
+            if exclude_id and hf.id == exclude_id:
+                continue  # Skip self
+            existing_norm = os.path.normcase(os.path.abspath(hf.input_path))
+            if input_norm == existing_norm:
+                return hf.name
+        return None
+    
+    def export_hotfolder(self, hotfolder_id: str, export_path: str) -> tuple[bool, str]:
+        """Exportiert einen einzelnen Hotfolder als JSON-Datei"""
+        try:
+            hotfolder = self.get_hotfolder(hotfolder_id)
+            if not hotfolder:
+                return False, "Hotfolder nicht gefunden"
+            
+            # Erstelle Export-Daten mit nur einem Hotfolder
+            export_data = {
+                'version': '1.0',
+                'hotfolders': [hotfolder.to_dict()]
+            }
+            
+            # Speichere in Datei
+            with open(export_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Hotfolder '{hotfolder.name}' exportiert nach {export_path}")
+            return True, "Hotfolder erfolgreich exportiert"
+            
+        except Exception as e:
+            logger.exception(f"Fehler beim Exportieren des Hotfolders: {e}")
+            return False, f"Fehler beim Exportieren: {str(e)}"
+    
+    def import_hotfolder(self, import_path: str, generate_new_id: bool = True) -> tuple[bool, str]:
+        """Importiert einen Hotfolder aus einer JSON-Datei. Der Hotfolder wird standardmäßig deaktiviert."""
+        try:
+            # Lade JSON-Datei
+            with open(import_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Validiere Struktur
+            if 'hotfolders' not in data or not isinstance(data['hotfolders'], list):
+                return False, "Ungültige Dateistruktur: 'hotfolders' Array fehlt"
+            
+            if len(data['hotfolders']) == 0:
+                return False, "Keine Hotfolder in der Datei gefunden"
+            
+            # Nimm den ersten Hotfolder
+            hotfolder_data = data['hotfolders'][0]
+            
+            # Erstelle HotfolderConfig aus den Daten
+            imported_hotfolder = HotfolderConfig.from_dict(hotfolder_data)
+            
+            # Generiere neue ID wenn gewünscht (verhindert Duplikate)
+            if generate_new_id:
+                imported_hotfolder.id = str(uuid.uuid4())
+            
+            # WICHTIG: Deaktiviere den Hotfolder beim Import
+            imported_hotfolder.enabled = False
+            
+            # Prüfe ob ID bereits existiert
+            if not generate_new_id:
+                for hf in self.hotfolders:
+                    if hf.id == imported_hotfolder.id:
+                        return False, "Ein Hotfolder mit dieser ID existiert bereits"
+            
+            # Füge Hotfolder hinzu (OHNE Pfad-Duplikat-Prüfung)
+            self.add_hotfolder(imported_hotfolder)
+            
+            logger.info(f"Hotfolder '{imported_hotfolder.name}' importiert (deaktiviert)")
+            return True, f"Hotfolder '{imported_hotfolder.name}' erfolgreich importiert (deaktiviert)"
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON-Fehler beim Importieren: {e}")
+            return False, "Ungültige JSON-Datei"
+        except Exception as e:
+            logger.exception(f"Fehler beim Importieren des Hotfolders: {e}")
+            return False, f"Fehler beim Importieren: {str(e)}"
 
 
 class SettingsManager:

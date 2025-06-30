@@ -1,0 +1,11 @@
+watchdog==6.0.0
+PyPDF2==3.0.1
+reportlab==4.4.2
+Pillow==11.2.1
+pytesseract==0.3.13
+pdf2image==1.17.0
+lxml==5.4.0
+pywin32==310
+ocrmypdf==16.10.2
+cryptography==45.0.4
+keyring==25.6.0

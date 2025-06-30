@@ -2,7 +2,7 @@
 Hauptfenster der Hotfolder-Anwendung
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import sys
 import os
 from typing import Optional
@@ -57,6 +57,11 @@ class MainWindow:
         file_menu.add_command(label="Neuer Hotfolder", command=self._new_hotfolder,
                              accelerator="Ctrl+N")
         file_menu.add_separator()
+        file_menu.add_command(label="Hotfolder importieren...", command=self._import_hotfolder,
+                             accelerator="Ctrl+I")
+        file_menu.add_command(label="Hotfolder exportieren...", command=self._export_hotfolder,
+                             accelerator="Ctrl+E")
+        file_menu.add_separator()
         file_menu.add_command(label="Beenden", command=self._on_closing,
                              accelerator="Alt+F4")
         
@@ -67,6 +72,9 @@ class MainWindow:
                              accelerator="F2")
         edit_menu.add_command(label="Hotfolder löschen", command=self._delete_hotfolder,
                              accelerator="Del")
+        edit_menu.add_separator()
+        edit_menu.add_command(label="Hotfolder Aktivieren/Deaktivieren", command=self._toggle_hotfolder,
+                             accelerator="Leertaste")
         edit_menu.add_separator()
         edit_menu.add_command(label="Einstellungen", command=self._show_settings)
         
@@ -82,8 +90,11 @@ class MainWindow:
         
         # Keyboard Shortcuts
         self.root.bind("<Control-n>", lambda e: self._new_hotfolder())
+        self.root.bind("<Control-i>", lambda e: self._import_hotfolder())
+        self.root.bind("<Control-e>", lambda e: self._export_hotfolder())
         self.root.bind("<F2>", lambda e: self._edit_hotfolder())
         self.root.bind("<Delete>", lambda e: self._delete_hotfolder())
+        self.root.bind("<space>", lambda e: self._toggle_hotfolder())
     
     def _create_widgets(self):
         """Erstellt alle Widgets"""
@@ -125,6 +136,8 @@ class MainWindow:
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Aktivieren/Deaktivieren", 
                                      command=self._toggle_hotfolder)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Exportieren", command=self._export_hotfolder)
         
         # Statusbar
         self.statusbar = ttk.Frame(self.root)
@@ -141,7 +154,7 @@ class MainWindow:
         self.toolbar.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
         self.new_button.pack(side=tk.LEFT, padx=(0, 5))
         self.edit_button.pack(side=tk.LEFT, padx=(0, 5))
-        self.delete_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.delete_button.pack(side=tk.LEFT)
         
         # Hauptbereich
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
@@ -311,6 +324,21 @@ class MainWindow:
             return
         
         new_state = not hotfolder.enabled
+        
+        # Bei Aktivierung: Prüfe auf doppelte Input-Pfade
+        if new_state:  # Nur beim Aktivieren prüfen
+            duplicate_name = self.manager.config_manager.check_duplicate_input_path(
+                hotfolder.input_path, 
+                exclude_id=hotfolder_id
+            )
+            if duplicate_name:
+                messagebox.showerror(
+                    "Doppelter Input-Ordner",
+                    f"Der Input-Ordner wird bereits vom Hotfolder '{duplicate_name}' verwendet.\n\n"
+                    f"Bitte ändern Sie zuerst den Input-Ordner dieses Hotfolders."
+                )
+                return
+        
         success, message = self.manager.toggle_hotfolder(hotfolder_id, new_state)
         
         if success:
@@ -318,6 +346,65 @@ class MainWindow:
             self._update_status(message)
         else:
             messagebox.showerror("Fehler", message)
+    
+    def _import_hotfolder(self):
+        """Importiert einen Hotfolder aus einer JSON-Datei"""
+        filename = filedialog.askopenfilename(
+            parent=self.root,
+            title="Hotfolder importieren",
+            filetypes=[
+                ("JSON-Dateien", "*.json"),
+                ("Alle Dateien", "*.*")
+            ]
+        )
+        
+        if filename:
+            # Importiere mit neuer ID um Duplikate zu vermeiden
+            success, message = self.manager.config_manager.import_hotfolder(filename, generate_new_id=True)
+            
+            if success:
+                self._refresh_list()
+                self._update_status(message)
+                messagebox.showinfo("Import erfolgreich", 
+                    message + "\n\nDer Hotfolder wurde deaktiviert importiert. "
+                    "Sie können ihn bearbeiten und anschließend aktivieren.")
+            else:
+                messagebox.showerror("Fehler beim Import", message)
+    
+    def _export_hotfolder(self):
+        """Exportiert den ausgewählten Hotfolder"""
+        hotfolder_id = self._get_selected_hotfolder_id()
+        if not hotfolder_id:
+            messagebox.showwarning("Kein Hotfolder ausgewählt", 
+                                  "Bitte wählen Sie einen Hotfolder aus, den Sie exportieren möchten.")
+            return
+        
+        hotfolder = self.manager.get_hotfolder(hotfolder_id)
+        if not hotfolder:
+            return
+        
+        # Vorgeschlagener Dateiname
+        default_filename = f"{hotfolder.name.replace(' ', '_')}_hotfolder.json"
+        
+        filename = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Hotfolder exportieren",
+            defaultextension=".json",
+            initialfile=default_filename,
+            filetypes=[
+                ("JSON-Dateien", "*.json"),
+                ("Alle Dateien", "*.*")
+            ]
+        )
+        
+        if filename:
+            success, message = self.manager.config_manager.export_hotfolder(hotfolder_id, filename)
+            
+            if success:
+                self._update_status(message)
+                messagebox.showinfo("Export erfolgreich", message)
+            else:
+                messagebox.showerror("Fehler beim Export", message)
     
     def _manage_counters(self):
         """Öffnet das Counter-Management-Tool"""
@@ -363,7 +450,8 @@ class MainWindow:
             "• Automatische Ordnerüberwachung\n"
             "• Auto-Increment Counter\n"
             "• Erweiterte Funktions-Sprache\n"
-            "• Multiple Export-Formate und -Methoden"
+            "• Multiple Export-Formate und -Methoden\n"
+            "• Import/Export von Hotfolder-Konfigurationen"
         )
     
     def _update_status(self, message: str = None):

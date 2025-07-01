@@ -243,6 +243,7 @@ class MainWindow:
                 output_filename_expression=str(result.get("output_filename_expression", "<FileName>") or "<FileName>"),
                 ocr_zones=result.get("ocr_zones", []),
                 export_configs=result.get("export_configs", []),
+                stamp_configs=result.get("stamp_configs", []),  # HINZUGEFÜGT
                 error_path=str(result.get("error_path", "") or "")
             )
             
@@ -281,6 +282,7 @@ class MainWindow:
                 output_filename_expression=str(result.get("output_filename_expression", "<FileName>") or "<FileName>"),
                 ocr_zones=result.get("ocr_zones", []),
                 export_configs=result.get("export_configs", []),
+                stamp_configs=result.get("stamp_configs", []),  # HINZUGEFÜGT
                 error_path=str(result.get("error_path", "") or "")
             )
             

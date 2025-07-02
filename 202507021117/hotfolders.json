@@ -1,0 +1,207 @@
+{
+  "version": "1.0",
+  "hotfolders": [
+    {
+      "id": "c19ce275-c584-44ef-bd94-9f755998609b",
+      "name": "Hotfolder Test",
+      "input_path": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Input",
+      "enabled": true,
+      "description": "Test Hotfolder",
+      "process_pairs": true,
+      "actions": [],
+      "action_params": {},
+      "file_patterns": [
+        "*.pdf"
+      ],
+      "xml_field_mappings": [
+        {
+          "field_name": "VNR",
+          "description": "",
+          "source_type": "expression",
+          "expression": "<OCR_Vorgangsnummer>",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "TESTO",
+          "description": "",
+          "source_type": "expression",
+          "expression": "Moin",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "WERT1",
+          "description": "",
+          "source_type": "expression",
+          "expression": "1",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "SCRIPT",
+          "description": "",
+          "source_type": "expression",
+          "expression": "SCRIPTING(\"C:\\Users\\Schreibtisch\\Desktop\\wert_mapping.bat\",\"<WERT1>\",\"2\")",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Leer",
+          "description": "",
+          "source_type": "expression",
+          "expression": "",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "Ordner",
+          "description": "",
+          "source_type": "expression",
+          "expression": "<level0> <level1> <level2> <level3>",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "lieferantennummer",
+          "description": "",
+          "source_type": "expression",
+          "expression": "139540",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        },
+        {
+          "field_name": "SQL",
+          "description": "",
+          "source_type": "expression",
+          "expression": "SQL(\"stammdaten\",\"SELECT doc_lieferantennummer, doc_projektname FROM pdfviewer WHERE doc_lieferantennummer = '<lieferantennummer>'\",\"doc_projektname\")",
+          "zone": null,
+          "page_num": 1,
+          "zones": []
+        }
+      ],
+      "output_filename_expression": "<FileName>",
+      "ocr_zones": [
+        {
+          "name": "OCR_Vorgangsnummer",
+          "zone": [
+            1896,
+            752,
+            250,
+            82
+          ],
+          "page_num": 1
+        }
+      ],
+      "export_configs": [
+        {
+          "id": "1154f323-6a93-4725-bc98-892f04bf197a",
+          "name": "PDF",
+          "enabled": true,
+          "export_method": "file",
+          "export_format": "searchable_pdf_a",
+          "export_path_expression": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Output",
+          "export_filename_expression": "<TESTO>",
+          "format_params": {}
+        },
+        {
+          "id": "17201e4a-22e4-4650-b788-4a265fb57040",
+          "name": "XML",
+          "enabled": true,
+          "export_method": "file",
+          "export_format": "xml",
+          "export_path_expression": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Output",
+          "export_filename_expression": "<FileName>",
+          "format_params": {}
+        }
+      ],
+      "stamp_configs": [
+        {
+          "id": "5c594ae6-170d-4d60-a014-fe40568fb83e",
+          "name": "Eingang",
+          "enabled": true,
+          "position": "custom",
+          "custom_x": 20.0,
+          "custom_y": 10.0,
+          "margin_x": 20,
+          "margin_y": 20,
+          "rotation": 270.0,
+          "show_border": true,
+          "border_width": 2.0,
+          "border_color": "#000000",
+          "border_radius": 0.0,
+          "show_background": true,
+          "background_color": "#FFFFFF",
+          "background_opacity": 1.0,
+          "show_shadow": false,
+          "shadow_offset_x": 2.0,
+          "shadow_offset_y": 2.0,
+          "shadow_color": "#808080",
+          "shadow_opacity": 0.3,
+          "stamp_lines": [
+            {
+              "text": "EINGANG",
+              "font_name": "Helvetica",
+              "font_size": 16,
+              "font_color": "#FF0000",
+              "bold": true,
+              "italic": false,
+              "alignment": "center"
+            },
+            {
+              "text": "<Date>",
+              "font_name": "Helvetica",
+              "font_size": 12,
+              "font_color": "#000000",
+              "bold": false,
+              "italic": false,
+              "alignment": "center"
+            },
+            {
+              "text": "<Time>",
+              "font_name": "Helvetica",
+              "font_size": 12,
+              "font_color": "#000000",
+              "bold": false,
+              "italic": false,
+              "alignment": "left"
+            }
+          ],
+          "apply_to_pages": "first",
+          "custom_pages": [],
+          "auto_size": false,
+          "fixed_width": 200.0,
+          "fixed_height": 100.0,
+          "padding": 10.0
+        }
+      ],
+      "error_path": ""
+    },
+    {
+      "id": "e740d3d2-0262-4dc7-8a26-1b7caccf09fb",
+      "name": "2. Hotfolder",
+      "input_path": "C:/Users/Schreibtisch/Desktop/Hotfolder Test/Input",
+      "enabled": false,
+      "description": "",
+      "process_pairs": true,
+      "actions": [],
+      "action_params": {},
+      "file_patterns": [
+        "*.pdf"
+      ],
+      "xml_field_mappings": [],
+      "output_filename_expression": "<FileName>",
+      "ocr_zones": [],
+      "export_configs": [],
+      "stamp_configs": [],
+      "error_path": ""
+    }
+  ]
+}

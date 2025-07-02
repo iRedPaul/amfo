@@ -1,0 +1,27 @@
+{
+  "smtp_server": "",
+  "smtp_port": 587,
+  "smtp_username": "",
+  "smtp_password": "",
+  "smtp_from_address": "",
+  "smtp_use_tls": true,
+  "smtp_use_ssl": false,
+  "smtp_auth_method": "basic",
+  "oauth2_provider": "",
+  "oauth2_client_id": "",
+  "oauth2_client_secret": "",
+  "oauth2_access_token": "",
+  "oauth2_refresh_token": "",
+  "oauth2_token_expiry": "",
+  "default_export_path": "",
+  "default_error_path": "C:\\Users\\Schreibtisch\\AppData\\Roaming\\HotfolderPDFProcessor\\errors",
+  "application_paths": {
+    "tesseract": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+    "ghostscript": "C:\\Program Files\\gs\\gs10.04.0\\bin\\gswin64c.exe",
+    "poppler": "C:\\Users\\Schreibtisch\\Desktop\\Python\\hotfolder_pdf_processor\\poppler\\bin"
+  },
+  "ocr_default_language": "deu",
+  "ocr_additional_languages": [
+    "eng"
+  ]
+}

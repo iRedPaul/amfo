@@ -2,7 +2,7 @@ import json
 import os
 import logging
 import threading
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 import uuid
 from datetime import datetime
@@ -64,6 +64,76 @@ class ConfigManager:
             logger.info("Konfiguration gespeichert")
         except Exception as e:
             logger.error(f"Fehler beim Speichern der Konfiguration: {e}")
+    
+    def validate_paths(self, hotfolder: HotfolderConfig) -> Tuple[bool, str]:
+        """Validiert die Pfade eines Hotfolders
+        
+        Returns:
+            Tuple[bool, str]: (Gültig, Fehlermeldung oder Erfolgsmeldung)
+        """
+        try:
+            # Prüfe Input-Pfad
+            if not hotfolder.input_path:
+                return False, "Input-Pfad ist erforderlich"
+            
+            # Normalisiere Pfade für Vergleich
+            input_path = os.path.abspath(hotfolder.input_path)
+            
+            # Prüfe ob Input-Pfad existiert oder erstellt werden kann
+            if not os.path.exists(input_path):
+                try:
+                    os.makedirs(input_path, exist_ok=True)
+                    logger.info(f"Input-Pfad erstellt: {input_path}")
+                except Exception as e:
+                    return False, f"Input-Pfad konnte nicht erstellt werden: {e}"
+            
+            # Prüfe ob Input-Pfad ein Verzeichnis ist
+            if not os.path.isdir(input_path):
+                return False, "Input-Pfad muss ein Verzeichnis sein"
+            
+            # Prüfe Schreibrechte für Input-Pfad
+            if not os.access(input_path, os.W_OK):
+                return False, "Keine Schreibrechte für Input-Pfad"
+            
+            # Prüfe Export-Pfade wenn vorhanden
+            if hasattr(hotfolder, 'export_configs') and hotfolder.export_configs:
+                for export_config in hotfolder.export_configs:
+                    if hasattr(export_config, 'export_path') and export_config.export_path:
+                        export_path = export_config.export_path
+                        
+                        # Prüfe ob Export-Pfad ein Verzeichnis ist (wenn es existiert)
+                        if os.path.exists(export_path) and not os.path.isdir(export_path):
+                            return False, f"Export-Pfad muss ein Verzeichnis sein: {export_path}"
+                        
+                        # Versuche Export-Pfad zu erstellen wenn er nicht existiert
+                        if not os.path.exists(export_path):
+                            try:
+                                os.makedirs(export_path, exist_ok=True)
+                                logger.info(f"Export-Pfad erstellt: {export_path}")
+                            except Exception as e:
+                                return False, f"Export-Pfad konnte nicht erstellt werden: {export_path} - {e}"
+            
+            # Prüfe Fehler-Pfad wenn vorhanden
+            if hasattr(hotfolder, 'error_path') and hotfolder.error_path:
+                error_path = hotfolder.error_path
+                
+                # Prüfe ob Fehler-Pfad existiert oder erstellt werden kann
+                if not os.path.exists(error_path):
+                    try:
+                        os.makedirs(error_path, exist_ok=True)
+                        logger.info(f"Fehler-Pfad erstellt: {error_path}")
+                    except Exception as e:
+                        return False, f"Fehler-Pfad konnte nicht erstellt werden: {e}"
+                
+                # Prüfe ob Fehler-Pfad ein Verzeichnis ist
+                if not os.path.isdir(error_path):
+                    return False, "Fehler-Pfad muss ein Verzeichnis sein"
+            
+            return True, "Pfade sind gültig"
+            
+        except Exception as e:
+            logger.exception("Fehler bei der Pfad-Validierung")
+            return False, f"Fehler bei der Pfad-Validierung: {str(e)}"
     
     def add_hotfolder(self, hotfolder: HotfolderConfig) -> None:
         """Fügt einen neuen Hotfolder hinzu"""

@@ -160,10 +160,10 @@ class XMLFieldDialog:
         self.tree_frame.grid_columnconfigure(0, weight=1)
         self.tree_frame.grid_rowconfigure(0, weight=1)
         
-        # Buttons - Mit mehr Padding und sicherstellen dass sie sichtbar sind
+        # Buttons
         self.button_frame.pack(fill=tk.X, pady=(5, 10))
-        self.cancel_button.pack(side=tk.RIGHT, padx=(0, 0)) 
-        self.save_button.pack(side=tk.RIGHT, padx=(5, 0))
+        self.cancel_button.pack(side=tk.RIGHT, padx=(5, 0))
+        self.save_button.pack(side=tk.RIGHT)
     
     def _load_mappings(self):
         """Lädt die Mappings in die Liste"""
@@ -381,8 +381,8 @@ class FieldMappingEditDialog(ExpressionEditorBase):
     
     def _create_additional_widgets(self):
         """Erstellt zusätzliche Widgets für Feld-Konfiguration"""
-        # Feld-Konfiguration
-        self.field_frame = ttk.LabelFrame(self.main_frame, text="Feld-Konfiguration", padding="10")
+        # Feld-Konfiguration - wird im content_container erstellt
+        self.field_frame = ttk.LabelFrame(self.content_container, text="Feld-Konfiguration", padding="10")
         
         # Feldname
         self.field_name_label = ttk.Label(self.field_frame, text="XML-Feldname:")
@@ -394,21 +394,22 @@ class FieldMappingEditDialog(ExpressionEditorBase):
     
     def _layout_additional_widgets(self):
         """Layoutet die zusätzlichen Widgets"""
-        # Feld-Konfiguration
-        self.field_frame.pack(fill=tk.X, pady=(0, 10))
-        self.field_name_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        self.field_name_entry.grid(row=0, column=1, sticky="we")
-        self.desc_label.grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
-        self.desc_entry.grid(row=1, column=1, sticky="we", pady=(5, 0))
-        self.field_frame.columnconfigure(1, weight=1)
+        # Feld-Konfiguration - WICHTIG: Muss VOR dem Expression Builder gepackt werden
+        if hasattr(self, 'field_frame'):
+            self.field_frame.pack(fill=tk.X, pady=(0, 10))
+            self.field_name_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+            self.field_name_entry.grid(row=0, column=1, sticky="we")
+            self.desc_label.grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+            self.desc_entry.grid(row=1, column=1, sticky="we", pady=(5, 0))
+            self.field_frame.columnconfigure(1, weight=1)
     
     def _create_buttons(self):
         """Erstellt spezielle Buttons für Feld-Mapping"""
         # Button-Frame sollte bereits von der Basis-Klasse erstellt sein
-        self.cancel_button = ttk.Button(self.button_frame, text="Abbrechen", 
-                                       command=self._on_cancel, style="Dialog.TButton")
         self.save_button = ttk.Button(self.button_frame, text="Speichern", 
                                      command=self._on_save, style="Dialog.TButton")
+        self.cancel_button = ttk.Button(self.button_frame, text="Abbrechen", 
+                                       command=self._on_cancel, style="Dialog.TButton")
 
     def _layout_buttons(self):
         """Layoutet die Buttons"""
@@ -416,8 +417,8 @@ class FieldMappingEditDialog(ExpressionEditorBase):
         if not self.button_frame.winfo_manager():
             self.button_frame.pack(fill=tk.X, pady=(10, 10))
         
-        self.save_button.pack(side=tk.RIGHT, padx=(5, 0))
-        self.cancel_button.pack(side=tk.RIGHT)
+        self.cancel_button.pack(side=tk.RIGHT, padx=(5, 0))
+        self.save_button.pack(side=tk.RIGHT)
     
     def _validate(self) -> bool:
         """Validiert die Eingaben"""

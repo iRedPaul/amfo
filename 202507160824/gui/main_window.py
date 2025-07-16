@@ -58,13 +58,21 @@ class MainWindow:
         # Initialisiere Statusleiste
         self._update_status()
 
-
-
     def _configure_styles(self):
         """Konfiguriert alle ttk-Stile für ein modernes Aussehen."""
         self.style = ttk.Style()
         self.style.theme_use('clam')
 
+        # Definiere Farben
+        self.primary_color = "#233462"  # Dunkelblau (Akzentfarbe)
+        self.bg_color = "#FFFFFF"
+        self.content_bg = "#ECECEC"
+        self.field_bg = "#F8F8F8"  # Leicht grau für besseren Kontrast
+        self.hover_color = "#E0E0E0"
+        self.active_color = "#D0D0D0"
+        self.text_color = "#333333"
+        self.disabled_color = "#888888"
+        
         # Schriftarten definieren
         self.default_font = ("Segoe UI", 10)
         self.bold_font = ("Segoe UI", 10, "bold")
@@ -72,32 +80,260 @@ class MainWindow:
 
         # Globale Stile anpassen
         self.style.configure('.',
-                             background='#FFFFFF',
-                             foreground='#333333',
+                             background=self.bg_color,
+                             foreground=self.text_color,
                              font=self.default_font,
-                             fieldbackground='#FFFFFF')
+                             fieldbackground=self.field_bg,
+                             bordercolor='#CCCCCC',
+                             darkcolor='#CCCCCC',
+                             lightcolor=self.bg_color,
+                             insertcolor=self.primary_color,
+                             arrowcolor=self.primary_color)
         
         self.root.option_add('*TCombobox*Listbox.font', self.default_font)
+        self.root.option_add('*TCombobox*Listbox.selectBackground', self.primary_color)
+        self.root.option_add('*TCombobox*Listbox.selectForeground', 'white')
 
-        # Spezifische Widget-Stile
-        self.style.configure("TFrame", background='#FFFFFF')
-        self.style.configure("Top.TFrame", background='#FFFFFF')
-        self.style.configure("Content.TFrame", background='#ECECEC')
+        # Frame-Stile
+        self.style.configure("TFrame", background=self.bg_color)
+        self.style.configure("Top.TFrame", background=self.bg_color)
+        self.style.configure("Content.TFrame", background=self.content_bg)
 
-        self.style.configure("TButton", padding=(12, 6), font=self.default_font, relief="flat", borderwidth=0)
+        # Button-Stile - mit sichtbarem Hintergrund
+        self.style.configure("TButton", 
+                           padding=(12, 6), 
+                           font=self.default_font, 
+                           relief="raised",  # Geändert von "flat" zu "raised"
+                           borderwidth=1,
+                           background='#F0F0F0')
         self.style.map("TButton",
-            background=[('active', '#E0E0E0'), ('!active', '#F0F0F0')],
-            foreground=[('!disabled', '#333333')]
-        )
+            background=[('pressed', self.primary_color),
+                       ('active', self.hover_color), 
+                       ('!active', '#F0F0F0')],
+            foreground=[('pressed', 'white'),
+                       ('active', self.text_color),
+                       ('!disabled', self.text_color),
+                       ('disabled', self.disabled_color)],
+            relief=[('pressed', 'sunken'), ('!pressed', 'raised')])  # Relief hinzugefügt
         
-        self.style.configure("Treeview", rowheight=30, font=self.default_font)
-        self.style.configure("Treeview.Heading", font=self.bold_font, padding=(10, 8))
+        # Spezielle Styles für Dialog-Buttons
+        self.style.configure("Dialog.TButton",
+                           padding=(12, 6),
+                           font=self.default_font,
+                           relief="raised",
+                           borderwidth=2,
+                           background='#E8E8E8')
+        self.style.map("Dialog.TButton",
+            background=[('pressed', self.primary_color),
+                       ('active', '#D0D0D0'),
+                       ('!active', '#E8E8E8')],
+            foreground=[('pressed', 'white'),
+                       ('active', self.text_color)],
+            relief=[('pressed', 'sunken'), ('!pressed', 'raised')])
+        
+        # Entry-Stil für besseren Kontrast
+        self.style.configure("TEntry",
+                           fieldbackground=self.field_bg,
+                           borderwidth=1,
+                           relief="solid",
+                           bordercolor='#CCCCCC')
+        self.style.map("TEntry",
+                      fieldbackground=[('focus', 'white')],
+                      bordercolor=[('focus', self.primary_color)])
+        
+        # Combobox-Stil
+        self.style.configure("TCombobox",
+                           fieldbackground=self.field_bg,
+                           borderwidth=1,
+                           relief="solid",
+                           bordercolor='#CCCCCC',
+                           arrowcolor=self.primary_color)
+        self.style.map("TCombobox",
+                      fieldbackground=[('focus', 'white')],
+                      bordercolor=[('focus', self.primary_color)])
+        
+        # Spinbox-Stil
+        self.style.configure("TSpinbox",
+                           fieldbackground=self.field_bg,
+                           borderwidth=1,
+                           relief="solid",
+                           bordercolor='#CCCCCC',
+                           arrowcolor=self.primary_color)
+        self.style.map("TSpinbox",
+                      fieldbackground=[('focus', 'white')],
+                      bordercolor=[('focus', self.primary_color)])
+        
+        # Treeview-Stil
+        self.style.configure("Treeview", 
+                           rowheight=30, 
+                           font=self.default_font,
+                           fieldbackground='white',
+                           borderwidth=1,
+                           relief="solid",
+                           bordercolor='#CCCCCC')
+        self.style.configure("Treeview.Heading", 
+                           font=self.bold_font, 
+                           padding=(10, 8),
+                           background='#F5F5F5',
+                           relief="flat")
         self.style.map('Treeview',
-                       background=[('selected', '#233462')],
-                       foreground=[('selected', 'white')])
+                      background=[('selected', self.primary_color)],
+                      foreground=[('selected', 'white')])
+        self.style.map("Treeview.Heading",
+                      background=[('active', self.hover_color)])
 
         # Entfernt den gestrichelten Fokus-Rahmen um die Treeview-Items
         self.style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])
+
+        # Notebook-Stile - Ausgewählter Tab größer
+        self.style.configure("TNotebook", 
+                           background=self.bg_color,
+                           borderwidth=0,
+                           tabmargins=[2, 5, 2, 0])
+
+        # Standard-Padding für nicht ausgewählte Tabs (kleiner)
+        self.style.configure("TNotebook.Tab", 
+                           padding=[12, 4],  # Kleineres Padding
+                           font=self.default_font,
+                           borderwidth=0)
+
+        # Map für verschiedene Zustände
+        self.style.map("TNotebook.Tab",
+                      padding=[('selected', [20, 8]),  # Größeres Padding für ausgewählten Tab
+                              ('!selected', [12, 4])],   # Kleineres Padding für nicht ausgewählte
+                      background=[('selected', self.bg_color), 
+                                ('active', self.hover_color),
+                                ('!selected', '#F0F0F0')],
+                      foreground=[('selected', self.primary_color), 
+                                ('active', self.text_color),
+                                ('!selected', self.text_color)])
+
+        # Scrollbar-Stile - Modern und flach
+        self.style.configure("Vertical.TScrollbar",
+                           width=12,
+                           borderwidth=0,
+                           relief="flat",
+                           background='#F0F0F0',
+                           darkcolor='#F0F0F0',
+                           lightcolor='#F0F0F0',
+                           troughcolor='#F8F8F8',
+                           arrowcolor='#666666')
+        self.style.map("Vertical.TScrollbar",
+                      background=[('active', '#D0D0D0'),
+                                ('pressed', self.primary_color)],
+                      arrowcolor=[('pressed', 'white')])
+        
+        self.style.configure("Horizontal.TScrollbar",
+                           width=12,
+                           borderwidth=0,
+                           relief="flat",
+                           background='#F0F0F0',
+                           darkcolor='#F0F0F0',
+                           lightcolor='#F0F0F0',
+                           troughcolor='#F8F8F8',
+                           arrowcolor='#666666')
+        self.style.map("Horizontal.TScrollbar",
+                      background=[('active', '#D0D0D0'),
+                                ('pressed', self.primary_color)],
+                      arrowcolor=[('pressed', 'white')])
+        
+        # Modernes Scrollbar-Layout
+        self.style.layout('Vertical.TScrollbar', [
+            ('Vertical.Scrollbar.trough', {
+                'children': [
+                    ('Vertical.Scrollbar.thumb', {
+                        'expand': '1',
+                        'sticky': 'nswe'
+                    })
+                ],
+                'sticky': 'ns'
+            })
+        ])
+        
+        self.style.layout('Horizontal.TScrollbar', [
+            ('Horizontal.Scrollbar.trough', {
+                'children': [
+                    ('Horizontal.Scrollbar.thumb', {
+                        'expand': '1',
+                        'sticky': 'nswe'
+                    })
+                ],
+                'sticky': 'ew'
+            })
+        ])
+        
+        # LabelFrame-Stil
+        self.style.configure("TLabelframe", 
+                           background=self.bg_color,
+                           borderwidth=1,
+                           relief="solid",
+                           bordercolor='#CCCCCC')
+        self.style.configure("TLabelframe.Label", 
+                           background=self.bg_color,
+                           foreground=self.primary_color,
+                           font=self.bold_font)
+        
+        # Checkbutton-Stil
+        self.style.configure("TCheckbutton",
+                           background=self.bg_color,
+                           foreground=self.text_color,
+                           focuscolor=self.primary_color)
+        self.style.map("TCheckbutton",
+                      background=[('active', self.bg_color)],
+                      foreground=[('disabled', self.disabled_color)])
+        
+        # Radiobutton-Stil
+        self.style.configure("TRadiobutton",
+                           background=self.bg_color,
+                           foreground=self.text_color,
+                           focuscolor=self.primary_color)
+        self.style.map("TRadiobutton",
+                      background=[('active', self.bg_color)],
+                      foreground=[('disabled', self.disabled_color)])
+        
+        # Scale-Stil
+        self.style.configure("Horizontal.TScale",
+                           background=self.bg_color,
+                           troughcolor=self.field_bg,
+                           borderwidth=1,
+                           darkcolor='#CCCCCC',
+                           lightcolor=self.bg_color)
+        self.style.map("Horizontal.TScale",
+                      troughcolor=[('active', '#E0E0E0')])
+        
+        # Progressbar-Stil
+        self.style.configure("TProgressbar",
+                           background=self.primary_color,
+                           troughcolor=self.field_bg,
+                           borderwidth=0,
+                           darkcolor=self.primary_color,
+                           lightcolor=self.primary_color)
+        
+        # Menü-Stil Konfiguration
+        self.root.option_add('*Menu.font', self.default_font)
+        self.root.option_add('*Menu.background', self.bg_color)
+        self.root.option_add('*Menu.foreground', self.text_color)
+        self.root.option_add('*Menu.activeBackground', self.primary_color)
+        self.root.option_add('*Menu.activeForeground', 'white')
+        self.root.option_add('*Menu.activeBorderWidth', 0)
+        self.root.option_add('*Menu.borderWidth', 1)
+        self.root.option_add('*Menu.relief', 'flat')
+        
+        # Listbox-Stile für alle Listboxen (inkl. OCR-Zonen)
+        self.root.option_add('*Listbox.font', self.default_font)
+        self.root.option_add('*Listbox.selectBackground', self.primary_color)
+        self.root.option_add('*Listbox.selectForeground', 'white')
+        self.root.option_add('*Listbox.activestyle', 'none')  # Entfernt gestrichelte Umrandung
+        
+        # Label-Stile für Links und spezielle Labels
+        self.style.configure("Link.TLabel",
+                           background=self.bg_color,
+                           foreground=self.primary_color,
+                           font=self.default_font,
+                           cursor="hand2")  # Hand-Cursor für Links
+        
+        # Toplevel-Dialog Hintergrund
+        self.root.option_add('*Toplevel.background', self.bg_color)
 
     def _create_top_bar(self):
         """Erstellt die obere Leiste mit Buttons und Banner."""
@@ -148,15 +384,22 @@ class MainWindow:
         text_frame = tk.Frame(parent, bg='white')
         text_frame.pack(padx=10)
         
-        beleg_label = tk.Label(text_frame, text="beleg", font=(self.banner_font[0], self.banner_font[1], "bold"), fg="#1a365d", bg='white')
+        beleg_label = tk.Label(text_frame, text="beleg", font=(self.banner_font[0], self.banner_font[1], "bold"), fg="#233462", bg='white')
         beleg_label.pack(side=tk.LEFT)
         
-        pilot_label = tk.Label(text_frame, text="pilot", font=self.banner_font, fg="#4299e1", bg='white')
+        pilot_label = tk.Label(text_frame, text="pilot", font=self.banner_font, fg="#233462", bg='white')
         pilot_label.pack(side=tk.LEFT)
 
     def _create_menu(self):
         """Erstellt die Menüleiste."""
-        menubar = tk.Menu(self.root, font=self.default_font)
+        menubar = tk.Menu(self.root, 
+                         font=self.default_font,
+                         background=self.bg_color,
+                         foreground=self.text_color,
+                         activebackground=self.primary_color,
+                         activeforeground='white',
+                         borderwidth=0,
+                         relief='flat')
         self.root.config(menu=menubar)
         
         # Menü-Struktur (vereinfacht zur Lesbarkeit)
@@ -187,7 +430,15 @@ class MainWindow:
         }
 
         for menu_name, items in menus.items():
-            menu = tk.Menu(menubar, tearoff=0, font=self.default_font)
+            menu = tk.Menu(menubar, 
+                          tearoff=0, 
+                          font=self.default_font,
+                          background=self.bg_color,
+                          foreground=self.text_color,
+                          activebackground=self.primary_color,
+                          activeforeground='white',
+                          borderwidth=0,
+                          relief='flat')
             menubar.add_cascade(label=menu_name, menu=menu)
             for item in items:
                 if item == "---":

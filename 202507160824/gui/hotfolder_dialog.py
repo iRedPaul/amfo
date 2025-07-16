@@ -134,7 +134,11 @@ class HotfolderDialog:
         
         # Beschreibung
         self.description_label = ttk.Label(self.basic_frame, text="Beschreibung (optional):")
-        self.description_text = tk.Text(self.basic_frame, height=3, width=50, wrap=tk.WORD)
+        
+        # Text-Widget mit Entry-ähnlichem Hintergrund
+        entry_bg = ttk.Style().lookup('TEntry', 'fieldbackground')
+        self.description_text = tk.Text(self.basic_frame, height=3, width=50, wrap=tk.WORD,
+                                       background=entry_bg if entry_bg else '#f5f5f5')
         self.description_text.insert("1.0", self.description_var.get())
         
         # Input-Pfad
@@ -401,9 +405,9 @@ class HotfolderDialog:
             self.no_export_info.pack(pady=(10, 0))
         
         # Buttons
-        self.button_frame.pack(fill=tk.X)
+        self.button_frame.pack(fill=tk.X, pady=(5, 10))
         self.cancel_button.pack(side=tk.RIGHT, padx=(5, 0))
-        self.save_button.pack(side=tk.RIGHT)
+        self.save_button.pack(side=tk.RIGHT, padx=(0, 0))
         
         # Lade OCR-Zonen in Liste
         self._refresh_zones_list()

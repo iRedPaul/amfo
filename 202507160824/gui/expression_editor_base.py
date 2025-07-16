@@ -31,7 +31,7 @@ class ExpressionEditorBase:
         self.dialog.title(title)
         self.dialog.geometry(geometry)
         self.dialog.resizable(True, True)
-        self.dialog.minsize(1000, 600)
+        self.dialog.minsize(1000, 800)
         
         # Zentriere Dialog
         self._center_window()
@@ -73,21 +73,28 @@ class ExpressionEditorBase:
         # Hauptframe
         self.main_frame = ttk.Frame(self.dialog, padding="10")
         
+        # Container für scrollbaren Inhalt
+        self.content_container = ttk.Frame(self.main_frame)
+        
         # Beschreibung (optional)
         if self.description:
-            self.desc_frame = ttk.LabelFrame(self.main_frame, text="Information", padding="10")
+            self.desc_frame = ttk.LabelFrame(self.content_container, text="Information", padding="10")
             self.desc_label = ttk.Label(self.desc_frame, text=self.description, wraplength=800)
         
         # Erstelle zusätzliche Widgets für Subklassen
         self._create_additional_widgets()
         
         # Expression Builder
-        self.expr_frame = ttk.LabelFrame(self.main_frame, text="Ausdruck erstellen", padding="10")
+        self.expr_frame = ttk.LabelFrame(self.content_container, text="Ausdruck erstellen", padding="10")
         
         # Expression-Eingabe
         self.expr_input_frame = ttk.Frame(self.expr_frame)
         self.expr_label = ttk.Label(self.expr_input_frame, text="Ausdruck:")
-        self.expr_text = tk.Text(self.expr_input_frame, height=4, width=50)
+        
+        # Text-Widget mit Entry-ähnlichem Hintergrund
+        entry_bg = ttk.Style().lookup('TEntry', 'fieldbackground')
+        self.expr_text = tk.Text(self.expr_input_frame, height=4, width=50, 
+                                background=entry_bg if entry_bg else '#f5f5f5')
         
         # Unterer Bereich: Variablen/Funktionen und Hilfe nebeneinander
         self.bottom_frame = ttk.Frame(self.expr_frame)
@@ -95,9 +102,9 @@ class ExpressionEditorBase:
         # Linke Seite: Variablen und Funktionen
         self.left_panel = ttk.LabelFrame(self.bottom_frame, text="Variablen und Funktionen", padding="5")
         
-        # Tree mit Scrollbar
+        # Tree mit Scrollbar - stark reduzierte Höhe
         self.tree_container = ttk.Frame(self.left_panel)
-        self.var_func_tree = ttk.Treeview(self.tree_container, height=20)
+        self.var_func_tree = ttk.Treeview(self.tree_container, height=10)  # Reduziert auf 10
         self.var_func_tree.heading("#0", text="Verfügbare Elemente")
         
         self.tree_scroll = ttk.Scrollbar(self.tree_container, orient="vertical",
@@ -107,12 +114,12 @@ class ExpressionEditorBase:
         # Rechte Seite: Hilfe-Panel
         self.right_panel = ttk.LabelFrame(self.bottom_frame, text="Hilfe", padding="5")
         
-        self.help_text = tk.Text(self.right_panel, height=20, width=50, wrap=tk.WORD, state=tk.DISABLED)
+        self.help_text = tk.Text(self.right_panel, height=10, width=50, wrap=tk.WORD, state=tk.DISABLED)  # Reduziert auf 10
         self.help_scroll = ttk.Scrollbar(self.right_panel, orient="vertical",
                                         command=self.help_text.yview)
         self.help_text.configure(yscrollcommand=self.help_scroll.set)
         
-        # Buttons
+        # Buttons in separatem Frame am unteren Rand
         self.button_frame = ttk.Frame(self.main_frame)
         self._create_buttons()
         
@@ -136,7 +143,11 @@ class ExpressionEditorBase:
     
     def _layout_widgets(self):
         """Layoutet alle Widgets - kann in Subklassen erweitert werden"""
+        # Hauptframe füllt den Dialog
         self.main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Content Container - expandiert
+        self.content_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         # Beschreibung
         if hasattr(self, 'desc_frame'):
@@ -146,15 +157,15 @@ class ExpressionEditorBase:
         # Zusätzliche Widgets für Subklassen
         self._layout_additional_widgets()
         
-        # Expression Builder
-        self.expr_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        # Expression Builder - expandiert
+        self.expr_frame.pack(fill=tk.BOTH, expand=True)
         
         # Expression-Eingabe
         self.expr_input_frame.pack(fill=tk.X, pady=(0, 10))
         self.expr_label.pack(anchor=tk.W)
         self.expr_text.pack(fill=tk.X, pady=(5, 0))
         
-        # Unterer Bereich
+        # Unterer Bereich - expandiert
         self.bottom_frame.pack(fill=tk.BOTH, expand=True)
         
         # Linkes Panel: Variablen/Funktionen
@@ -168,12 +179,13 @@ class ExpressionEditorBase:
         self.help_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.help_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Buttons
-        self.button_frame.pack(fill=tk.X)
+        # Buttons - WICHTIG: Am unteren Rand mit festem Platz
+        self.button_frame.pack(fill=tk.X, pady=(10, 0), side=tk.BOTTOM)
         self._layout_buttons()
     
     def _layout_additional_widgets(self):
-        """Überschreibbar für zusätzliche Widget-Layout in Subklassen"""
+        """Überschreibbar für zusätzliche Widget-Layout in Subklassen
+        WICHTIG: Muss im content_container gepackt werden!"""
         pass
     
     def _layout_buttons(self):

@@ -27,6 +27,7 @@ class XMLFieldDialog:
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("XML-Felder konfigurieren")
         self.dialog.geometry("1000x700")
+        self.dialog.minsize(800, 700)
         self.dialog.resizable(True, True)
         
         # Zentriere Dialog
@@ -76,7 +77,7 @@ class XMLFieldDialog:
             self.info_frame = ttk.LabelFrame(self.main_frame, text="Verfügbare OCR-Zonen", padding="5")
             zone_names = [zone.get('name', f"Zone_{i+1}") for i, zone in enumerate(self.ocr_zones)]
             info_text = f"Definierte Zonen: {', '.join(zone_names)}"
-            self.info_label = ttk.Label(self.info_frame, text=info_text, foreground="blue")
+            self.info_label = ttk.Label(self.info_frame, text=info_text, style="Link.TLabel")
         
         # Toolbar
         self.toolbar = ttk.Frame(self.main_frame)
@@ -102,7 +103,7 @@ class XMLFieldDialog:
         self.tree_frame = ttk.Frame(self.main_frame)
         self.tree = ttk.Treeview(self.tree_frame, 
                                 columns=("Field", "Description", "Expression"),
-                                show="tree headings", height=20)
+                                show="tree headings", height=15)
         
         # Spalten konfigurieren
         self.tree.heading("#0", text="")
@@ -152,30 +153,40 @@ class XMLFieldDialog:
         self.move_up_button.pack(side=tk.LEFT, padx=(0, 5))
         self.move_down_button.pack(side=tk.LEFT)
         
-        # Tree
+        # Tree - WICHTIG: pady unten hinzufügen für Platz für Buttons
         self.tree_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.vsb.grid(row=0, column=1, sticky="ns")
         self.tree_frame.grid_columnconfigure(0, weight=1)
         self.tree_frame.grid_rowconfigure(0, weight=1)
         
-        # Buttons
-        self.button_frame.pack(fill=tk.X)
-        self.cancel_button.pack(side=tk.RIGHT, padx=(5, 0))
-        self.save_button.pack(side=tk.RIGHT)
+        # Buttons - Mit mehr Padding und sicherstellen dass sie sichtbar sind
+        self.button_frame.pack(fill=tk.X, pady=(5, 10))
+        self.cancel_button.pack(side=tk.RIGHT, padx=(0, 0)) 
+        self.save_button.pack(side=tk.RIGHT, padx=(5, 0))
     
     def _load_mappings(self):
         """Lädt die Mappings in die Liste"""
-        for mapping_dict in self.mappings:
+        for i, mapping_dict in enumerate(self.mappings):
             mapping = FieldMapping.from_dict(mapping_dict)
-            self._add_to_tree(mapping, mapping_dict.get('description', ''))
+            item = self._add_to_tree(mapping, mapping_dict.get('description', ''))
+            # Alternierende Zeilenfarben
+            if i % 2 == 0:
+                self.tree.item(item, tags=('evenrow',))
+            else:
+                self.tree.item(item, tags=('oddrow',))
+        
+        # Definiere die Tag-Farben
+        self.tree.tag_configure('evenrow', background='white')
+        self.tree.tag_configure('oddrow', background='#F9F9F9')
     
     def _add_to_tree(self, mapping: FieldMapping, description: str = ''):
         """Fügt ein Mapping zur Baumanzeige hinzu"""
         expression_text = mapping.expression[:60] + "..." if len(mapping.expression) > 60 else mapping.expression
         
-        self.tree.insert("", "end", 
+        item = self.tree.insert("", "end", 
                         values=(mapping.field_name, description, expression_text))
+        return item
     
     def _on_selection_changed(self, event):
         """Wird aufgerufen wenn die Auswahl sich ändert"""
@@ -362,6 +373,9 @@ class FieldMappingEditDialog(ExpressionEditorBase):
             xml_field_mappings=xml_field_mappings  # WICHTIG: Übergebe XML-Feld-Mappings
         )
         
+        # Mindestgröße für dieses Fenster setzen
+        self.dialog.minsize(900, 600)
+        
         # Fokus auf Feldname
         self.field_name_entry.focus()
     
@@ -390,15 +404,20 @@ class FieldMappingEditDialog(ExpressionEditorBase):
     
     def _create_buttons(self):
         """Erstellt spezielle Buttons für Feld-Mapping"""
+        # Button-Frame sollte bereits von der Basis-Klasse erstellt sein
         self.cancel_button = ttk.Button(self.button_frame, text="Abbrechen", 
-                                       command=self._on_cancel)
+                                       command=self._on_cancel, style="Dialog.TButton")
         self.save_button = ttk.Button(self.button_frame, text="Speichern", 
-                                     command=self._on_save)
-    
+                                     command=self._on_save, style="Dialog.TButton")
+
     def _layout_buttons(self):
         """Layoutet die Buttons"""
-        self.cancel_button.pack(side=tk.RIGHT, padx=(5, 0))
-        self.save_button.pack(side=tk.RIGHT)
+        # Stelle sicher, dass der button_frame gepackt ist
+        if not self.button_frame.winfo_manager():
+            self.button_frame.pack(fill=tk.X, pady=(10, 10))
+        
+        self.save_button.pack(side=tk.RIGHT, padx=(5, 0))
+        self.cancel_button.pack(side=tk.RIGHT)
     
     def _validate(self) -> bool:
         """Validiert die Eingaben"""

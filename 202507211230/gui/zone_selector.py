@@ -8,6 +8,10 @@ from PIL import Image, ImageTk
 from pdf2image import convert_from_path
 import tempfile
 import os
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ZoneSelector:
@@ -27,6 +31,10 @@ class ZoneSelector:
         self.start_y = None
         self.rect_id = None
         self.zone = None
+        
+        # Lade Einstellungen für Poppler-Pfad
+        self.settings = self._load_settings()
+        self.poppler_path = self._get_poppler_path()
         
         # Dialog erstellen
         self.dialog = tk.Toplevel(parent)
@@ -50,6 +58,59 @@ class ZoneSelector:
         
         # Bind Events
         self.dialog.bind('<Escape>', lambda e: self._on_cancel())
+    
+    def _load_settings(self):
+        """Lädt Einstellungen aus settings.json"""
+        try:
+            settings_file = "config/settings.json"
+            
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                return {}
+        except Exception as e:
+            logger.error(f"Fehler beim Laden der Einstellungen: {e}")
+            return {}
+    
+    def _get_poppler_path(self):
+        """Ermittelt den korrekten Poppler-Pfad"""
+        # Prüfe zuerst konfigurierten Pfad aus settings.json
+        if self.settings.get('application_paths', {}).get('poppler'):
+            poppler_path = self.settings['application_paths']['poppler']
+            if os.path.exists(poppler_path):
+                logger.info(f"Poppler aus Einstellungen geladen: {poppler_path}")
+                return poppler_path
+            else:
+                logger.warning(f"Konfigurierter Poppler-Pfad ungültig: {poppler_path}")
+        
+        # Prüfe Installation im Programmverzeichnis (nach Installation)
+        program_paths = [
+            os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'belegpilot', 'dependencies', 'poppler', 'bin'),
+            os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'belegpilot', 'dependencies', 'poppler', 'bin')
+        ]
+        
+        for path in program_paths:
+            if os.path.exists(path):
+                logger.info(f"Poppler gefunden in Installationsverzeichnis: {path}")
+                return path
+        
+        # Prüfe relativen Pfad (für Entwicklung)
+        relative_path = os.path.join(os.path.dirname(__file__), '..', 'dependencies', 'poppler', 'bin')
+        relative_path = os.path.normpath(relative_path)
+        if os.path.exists(relative_path):
+            logger.info(f"Poppler gefunden (relativ): {relative_path}")
+            return relative_path
+        
+        # Fallback auf alten relativen Pfad
+        old_relative_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
+        old_relative_path = os.path.normpath(old_relative_path)
+        if os.path.exists(old_relative_path):
+            logger.info(f"Poppler gefunden (alter relativer Pfad): {old_relative_path}")
+            return old_relative_path
+        
+        logger.error("Poppler nicht gefunden!")
+        return None
     
     def _center_window(self):
         """Zentriert das Fenster relativ zum Parent"""
@@ -189,16 +250,20 @@ class ZoneSelector:
             return
         
         try:
+            # Prüfe ob Poppler verfügbar ist
+            if not self.poppler_path:
+                messagebox.showerror("Fehler", "Poppler nicht gefunden! Bitte überprüfen Sie die Installation.")
+                return
+            
             # Konvertiere PDF-Seite zu Bild
             with tempfile.TemporaryDirectory() as temp_dir:
-                poppler_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
                 images = convert_from_path(
                     self.pdf_path, 
                     dpi=150,  # Mittlere Qualität für Vorschau
                     first_page=self.page_var.get(),
                     last_page=self.page_var.get(),
                     output_folder=temp_dir,
-                    poppler_path=poppler_path
+                    poppler_path=self.poppler_path
                 )
                 
                 if images:
@@ -207,6 +272,7 @@ class ZoneSelector:
                     
         except Exception as e:
             messagebox.showerror("Fehler", f"Fehler beim Laden der PDF: {e}")
+            logger.error(f"PDF-Ladefehler: {e}", exc_info=True)
     
     def _display_image(self):
         """Zeigt das Bild auf dem Canvas an"""

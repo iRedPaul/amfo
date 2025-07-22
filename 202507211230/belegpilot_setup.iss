@@ -4,10 +4,11 @@
 #define MyAppPublisher "amsepa AG"
 #define MyAppURL "https://belegpilot.io"
 #define MyAppExeName "belegpilot.exe"
+#define MyServiceExeName "belegpilot_service.exe"
 
 [Setup]
 ; Eindeutige App-ID (generieren Sie eine neue GUID)
-AppId={{A7B3F4E2-9C8D-4F2A-B6E1-3E6F8A9E2C1B}
+AppId={{A7B3F4E2-9D8D-4F2A-B7E1-3E6F8A9E2C1B}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -42,10 +43,14 @@ Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "installservice"; Description: "Als Windows-Dienst installieren (für automatische Verarbeitung)"; GroupDescription: "Windows-Dienst:"; Flags: unchecked
 
 [Files]
 ; Hauptprogramm
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; Windows Service Executable
+Source: "dist\{#MyServiceExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Icon (ico)
 Source: "gui/assets/icon.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -65,6 +70,8 @@ Source: "dependencies\gs\*"; DestDir: "{app}\dependencies\gs"; Flags: ignorevers
 [Icons]
 ; Startmenü-Eintrag
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+; Service-Verwaltung im Startmenü
+Name: "{group}\Windows-Dienst verwalten"; Filename: "{app}\{#MyServiceExeName}"; Parameters: "status"; IconFilename: "{app}\icon.ico"
 ; Desktop-Verknüpfung (optional)
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
@@ -77,8 +84,82 @@ Root: HKLM; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string
 Root: HKLM; Subkey: "Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: string; ValueName: "{app}\{#MyAppExeName}"; ValueData: "RUNASADMIN"; Flags: uninsdeletekeyifempty uninsdeletevalue
 
 [Run]
+; Service installieren (wenn ausgewählt)
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "install"; StatusMsg: "Installiere Windows-Dienst..."; Flags: runhidden; Tasks: installservice
+; Service starten (wenn installiert)
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "start"; StatusMsg: "Starte Windows-Dienst..."; Flags: runhidden; Tasks: installservice
+
 ; Hauptprogramm nach Installation starten
 Filename: "{app}\{#MyAppExeName}"; Description: "belegpilot starten"; Flags: nowait postinstall skipifsilent runascurrentuser
+
+[UninstallRun]
+; Service stoppen und entfernen beim Deinstallieren
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "stop"; RunOnceId: "StopBelegpilotService"; Flags: runhidden
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "remove"; RunOnceId: "RemoveBelegpilotService"; Flags: runhidden
+
+[Code]
+var
+  ServicePage: TInputOptionWizardPage;
+
+procedure InitializeWizard;
+begin
+  // Erstelle eine benutzerdefinierte Seite für Service-Optionen
+  ServicePage := CreateInputOptionPage(wpSelectTasks,
+    'Windows-Dienst Konfiguration',
+    'Möchten Sie belegpilot als Windows-Dienst installieren?',
+    'Ein Windows-Dienst ermöglicht die automatische Verarbeitung von PDFs im Hintergrund, ' +
+    'auch wenn kein Benutzer angemeldet ist. Der Dienst startet automatisch beim Systemstart.' + #13#10#13#10 +
+    'Wählen Sie diese Option, wenn Sie eine dauerhafte Überwachung der Hotfolder wünschen.',
+    True, False);
+    
+  ServicePage.Add('Windows-Dienst installieren und automatisch starten');
+  ServicePage.Values[0] := True;
+end;
+
+function ShouldInstallService: Boolean;
+begin
+  Result := ServicePage.Values[0];
+end;
+
+// Prüfe ob der Service bereits installiert ist
+function IsServiceInstalled: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec('sc.exe', 'query belegpilot', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+// Event vor der Installation
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssInstall then
+  begin
+    // Stoppe den Service falls er läuft
+    if IsServiceInstalled then
+    begin
+      Exec(ExpandConstant('{app}\{#MyServiceExeName}'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+  end;
+end;
+
+// Event vor der Deinstallation
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Stoppe und entferne den Service
+    if IsServiceInstalled then
+    begin
+      Exec(ExpandConstant('{app}\{#MyServiceExeName}'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(2000); // Warte 2 Sekunden
+      Exec(ExpandConstant('{app}\{#MyServiceExeName}'), 'remove', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+  end;
+end;
 
 [Messages]
 ; Deutsche Meldungen

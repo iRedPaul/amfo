@@ -41,36 +41,161 @@ class ExportProcessor:
         self.ocr_processor = OCRProcessor()
         self._export_settings = None
         self._ocr_cache = {}
-        self._setup_tesseract()
+        self._setup_dependencies()
 
-    def _setup_tesseract(self):
-        """Konfiguriert Tesseract für OCRmyPDF"""
+    def _setup_dependencies(self):
+        """Konfiguriert alle Abhängigkeiten für OCRmyPDF"""
         settings = self._get_export_settings()
         
+        # Sammle alle Pfade die zum PATH hinzugefügt werden müssen
+        paths_to_add = []
+        
+        # Setze Windows-spezifische Umgebungsvariablen um Konsolen-Fenster zu verstecken
+        if os.name == 'nt':  # Windows
+            # Verstecke Konsolen-Fenster für Subprozesse
+            os.environ['PYTHONIOENCODING'] = 'utf-8'
+            os.environ['TESSERACT_DISABLE_DEBUG_CONSOLE'] = '1'
+            
+            # Patch subprocess.Popen für alle Subprozesse
+            import subprocess
+            
+            # Speichere Original Popen
+            original_popen = subprocess.Popen
+            
+            # Erstelle STARTUPINFO für versteckte Fenster
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = subprocess.SW_HIDE
+            
+            # Definiere gepatchte Popen Klasse
+            class PopenNoConsole(original_popen):
+                def __init__(self, *args, **kwargs):
+                    # Füge startupinfo hinzu wenn nicht vorhanden
+                    if os.name == 'nt' and 'startupinfo' not in kwargs:
+                        kwargs['startupinfo'] = si
+                    # Setze creationflags für noch besseres Verstecken
+                    if os.name == 'nt' and 'creationflags' not in kwargs:
+                        kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                    super().__init__(*args, **kwargs)
+            
+            # Ersetze subprocess.Popen global
+            subprocess.Popen = PopenNoConsole
+            
+            # Patch auch ocrmypdf's subprocess imports
+            try:
+                import ocrmypdf.subprocess
+                ocrmypdf.subprocess.Popen = PopenNoConsole
+                
+                # Patch ocrmypdf's run function
+                original_run = ocrmypdf.subprocess.run
+                
+                def run_no_console(*args, **kwargs):
+                    if os.name == 'nt':
+                        if 'startupinfo' not in kwargs:
+                            kwargs['startupinfo'] = si
+                        if 'creationflags' not in kwargs:
+                            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                    return original_run(*args, **kwargs)
+                
+                ocrmypdf.subprocess.run = run_no_console
+                
+                # Patch check_output auch
+                original_check_output = ocrmypdf.subprocess.check_output
+                
+                def check_output_no_console(*args, **kwargs):
+                    if os.name == 'nt':
+                        if 'startupinfo' not in kwargs:
+                            kwargs['startupinfo'] = si
+                        if 'creationflags' not in kwargs:
+                            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                    return original_check_output(*args, **kwargs)
+                
+                ocrmypdf.subprocess.check_output = check_output_no_console
+                
+            except Exception as e:
+                logger.debug(f"Konnte ocrmypdf subprocess nicht patchen: {e}")
+            
+            # Patch auch die Tesseract-spezifischen Module
+            try:
+                import ocrmypdf.builtin_plugins.tesseract_ocr
+                import ocrmypdf._exec.tesseract
+                
+                # Patch die run_tesseract Funktion
+                if hasattr(ocrmypdf._exec.tesseract, 'run_tesseract'):
+                    original_run_tesseract = ocrmypdf._exec.tesseract.run_tesseract
+                    
+                    def run_tesseract_no_console(*args, **kwargs):
+                        # Modifiziere kwargs für subprocess
+                        if 'env' in kwargs:
+                            kwargs['env']['TESSERACT_DISABLE_DEBUG_CONSOLE'] = '1'
+                        else:
+                            env = os.environ.copy()
+                            env['TESSERACT_DISABLE_DEBUG_CONSOLE'] = '1'
+                            kwargs['env'] = env
+                        
+                        return original_run_tesseract(*args, **kwargs)
+                    
+                    ocrmypdf._exec.tesseract.run_tesseract = run_tesseract_no_console
+                    
+            except Exception as e:
+                logger.debug(f"Konnte Tesseract-Module nicht patchen: {e}")
+        
+        # Tesseract
         if settings.application_paths and hasattr(settings.application_paths, 'tesseract'):
             tesseract_path = settings.application_paths.tesseract
-            
             if tesseract_path:
-                # Normalisiere den Pfad für Windows
                 tesseract_path = os.path.normpath(tesseract_path)
-                
                 if os.path.exists(tesseract_path):
-                    # Setze den Tesseract-Pfad für pytesseract (wird von ocr_processor verwendet)
+                    # Setze den Tesseract-Pfad für pytesseract
                     try:
                         import pytesseract
                         pytesseract.pytesseract.tesseract_cmd = tesseract_path
                     except:
                         pass
                     
-                    # Füge das Tesseract-Verzeichnis zum PATH hinzu
+                    # Füge Tesseract-Verzeichnis zum PATH hinzu
                     tesseract_dir = os.path.dirname(tesseract_path)
-                    current_path = os.environ.get('PATH', '')
-                    if tesseract_dir not in current_path:
-                        os.environ['PATH'] = tesseract_dir + os.pathsep + current_path
-                    
+                    paths_to_add.append(tesseract_dir)
                     logger.info(f"Tesseract konfiguriert: {tesseract_path}")
                 else:
                     logger.warning(f"Konfigurierter Tesseract-Pfad existiert nicht: {tesseract_path}")
+        
+        # Ghostscript
+        if settings.application_paths and hasattr(settings.application_paths, 'ghostscript'):
+            gs_path = settings.application_paths.ghostscript
+            if gs_path:
+                gs_path = os.path.normpath(gs_path)
+                if os.path.exists(gs_path):
+                    # Füge Ghostscript-Verzeichnis zum PATH hinzu
+                    gs_dir = os.path.dirname(gs_path)
+                    paths_to_add.append(gs_dir)
+                    logger.info(f"Ghostscript konfiguriert: {gs_path}")
+                else:
+                    logger.warning(f"Konfigurierter Ghostscript-Pfad existiert nicht: {gs_path}")
+        
+        # Poppler (für pdf2image)
+        if settings.application_paths and hasattr(settings.application_paths, 'poppler'):
+            poppler_path = settings.application_paths.poppler
+            if poppler_path:
+                poppler_path = os.path.normpath(poppler_path)
+                if os.path.exists(poppler_path):
+                    paths_to_add.append(poppler_path)
+                    logger.info(f"Poppler konfiguriert: {poppler_path}")
+                else:
+                    logger.warning(f"Konfigurierter Poppler-Pfad existiert nicht: {poppler_path}")
+        
+        # Aktualisiere PATH mit allen gefundenen Pfaden
+        if paths_to_add:
+            current_path = os.environ.get('PATH', '')
+            new_paths = []
+            
+            for path in paths_to_add:
+                if path not in current_path:
+                    new_paths.append(path)
+            
+            if new_paths:
+                os.environ['PATH'] = os.pathsep.join(new_paths) + os.pathsep + current_path
+                logger.debug(f"PATH erweitert mit: {', '.join(new_paths)}")
 
     def _get_unique_filename(self, filepath: str) -> str:
         """Generiert eindeutigen Dateinamen mit Nummerierung (_1, _2, etc.)"""
@@ -377,83 +502,144 @@ class ExportProcessor:
             
             logger.info(f"Starte PDF/A-Export (durchsuchbar)")
             
-            # Hole Tesseract-Pfad aus den Einstellungen
+            # Hole Einstellungen
             settings = self._get_export_settings()
-            tesseract_path = None
+            
+            # Prüfe ob alle benötigten Tools verfügbar sind
+            missing_tools = []
+            
+            # Prüfe Tesseract
+            tesseract_available = False
             if settings.application_paths and hasattr(settings.application_paths, 'tesseract'):
                 tesseract_path = settings.application_paths.tesseract
-                if tesseract_path:
-                    tesseract_path = os.path.normpath(tesseract_path)
-                    if not os.path.exists(tesseract_path):
-                        logger.warning(f"Tesseract-Pfad existiert nicht: {tesseract_path}")
-                        tesseract_path = None
+                if tesseract_path and os.path.exists(tesseract_path):
+                    tesseract_available = True
+                    logger.info(f"Verwende Tesseract: {tesseract_path}")
+                else:
+                    missing_tools.append("Tesseract")
+            else:
+                missing_tools.append("Tesseract")
+            
+            # Prüfe Ghostscript
+            gs_available = False
+            if settings.application_paths and hasattr(settings.application_paths, 'ghostscript'):
+                gs_path = settings.application_paths.ghostscript
+                if gs_path and os.path.exists(gs_path):
+                    gs_available = True
+                    logger.info(f"Verwende Ghostscript: {gs_path}")
+                else:
+                    missing_tools.append("Ghostscript")
+            else:
+                missing_tools.append("Ghostscript")
+            
+            if missing_tools:
+                return False, f"Fehlende Tools für PDF/A-Export: {', '.join(missing_tools)}"
+            
+            # Stelle sicher, dass PATH aktuell ist
+            self._setup_dependencies()
             
             # Prüfe zuerst, ob die PDF bereits Text hat
             has_text = self._check_pdf_has_text(pdf_path)
             logger.info(f"PDF hat {'bereits' if has_text else 'keinen'} Text")
             
-            if not has_text:
-                # OCR ist erforderlich - verwende OCRmyPDF
-                args = {
-                    "output_type": "pdfa-2",
-                    "pdfa_image_compression": "lossless",
-                    "optimize": 0,
-                    "oversample": 0,
-                    "jbig2_lossy": False,
-                    "force_ocr": True,
-                    "skip_text": False,
-                    "language": params.get('language', 'deu'),
-                    "rotate_pages": True,
-                    "deskew": False,
-                    "clean": False,
-                    "tesseract_timeout": params.get('timeout', 600),
-                    "invalidate_digital_signatures": True,
-                }
+            try:
+                # Erstelle temporäre Datei für die Ausgabe
+                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_output:
+                    temp_output_path = temp_output.name
                 
-                # Füge Tesseract-Pfad hinzu, wenn vorhanden
-                if tesseract_path:
-                    args['tesseract_cmd'] = tesseract_path
-                
-                # Führe OCR aus
-                result = ocrmypdf.ocr(pdf_path, output_file, **args)
-                
-                if result == ocrmypdf.ExitCode.ok:
-                    return True, f"PDF/A (Durchsuchbar) exportiert: {os.path.basename(output_file)}"
-                else:
-                    logger.error(f"OCRmyPDF fehlgeschlagen: {result}")
-                    # Fallback: Kopiere Original
-                    shutil.copy2(pdf_path, output_file)
-                    return True, f"PDF exportiert (ohne PDF/A): {os.path.basename(output_file)}"
+                if not has_text:
+                    # OCR ist erforderlich
+                    logger.debug("Führe OCR mit OCRmyPDF aus")
                     
-            else:
-                # Hat bereits Text - verwende OCRmyPDF ohne OCR für PDF/A-Konvertierung
-                args = {
-                    "output_type": "pdfa-2",
-                    "pdfa_image_compression": "lossless",
-                    "optimize": 0,
-                    "skip_text": True,
-                    "tesseract_timeout": 0,
-                    "force_ocr": False,
-                }
-                
-                # Füge Tesseract-Pfad hinzu, wenn vorhanden
-                if tesseract_path:
-                    args['tesseract_cmd'] = tesseract_path
-                
-                result = ocrmypdf.ocr(pdf_path, output_file, **args)
-                if result == ocrmypdf.ExitCode.ok:
-                    return True, f"PDF/A (Durchsuchbar) exportiert: {os.path.basename(output_file)}"
+                    # OCRmyPDF mit minimalen Optionen aufrufen
+                    result = ocrmypdf.ocr(
+                        input_file=pdf_path,
+                        output_file=temp_output_path,
+                        output_type='pdfa',
+                        language=params.get('language', 'deu'),
+                        force_ocr=True,
+                        skip_text=False,
+                        clean=False,
+                        deskew=False,
+                        rotate_pages=True,
+                        optimize=0,
+                        jpg_quality=0,  # Keine JPEG-Komprimierung
+                        png_quality=0,  # Keine PNG-Komprimierung
+                        jbig2_lossy=False,
+                        progress_bar=False,
+                        tesseract_timeout=params.get('timeout', 600)
+                    )
+                    
+                    if result == ocrmypdf.ExitCode.ok:
+                        # Verschiebe temporäre Datei zum finalen Ziel
+                        shutil.move(temp_output_path, output_file)
+                        return True, f"PDF/A (Durchsuchbar) exportiert: {os.path.basename(output_file)}"
+                    else:
+                        # Lösche temporäre Datei bei Fehler
+                        if os.path.exists(temp_output_path):
+                            os.unlink(temp_output_path)
+                        logger.error(f"OCRmyPDF fehlgeschlagen mit Code: {result}")
+                        return False, f"PDF/A-Konvertierung fehlgeschlagen (Code: {result})"
+                        
                 else:
-                    shutil.copy2(pdf_path, output_file)
-                    return True, f"PDF exportiert (ohne PDF/A): {os.path.basename(output_file)}"
+                    # Hat bereits Text - nur PDF/A-Konvertierung
+                    logger.debug("Konvertiere zu PDF/A ohne OCR")
+                    
+                    result = ocrmypdf.ocr(
+                        input_file=pdf_path,
+                        output_file=temp_output_path,
+                        output_type='pdfa',
+                        skip_text=True,
+                        force_ocr=False,
+                        optimize=0,
+                        progress_bar=False,
+                        tesseract_timeout=0
+                    )
+                    
+                    if result == ocrmypdf.ExitCode.ok:
+                        # Verschiebe temporäre Datei zum finalen Ziel
+                        shutil.move(temp_output_path, output_file)
+                        return True, f"PDF/A (Durchsuchbar) exportiert: {os.path.basename(output_file)}"
+                    else:
+                        # Lösche temporäre Datei bei Fehler
+                        if os.path.exists(temp_output_path):
+                            os.unlink(temp_output_path)
+                        logger.error(f"PDF/A-Konvertierung fehlgeschlagen mit Code: {result}")
+                        return False, f"PDF/A-Konvertierung fehlgeschlagen (Code: {result})"
+
+            except ocrmypdf.exceptions.InputFileError as e:
+                logger.error(f"OCRmyPDF Input-Fehler: {e}")
+                if 'temp_output_path' in locals() and os.path.exists(temp_output_path):
+                    os.unlink(temp_output_path)
+                return False, f"PDF/A-Export fehlgeschlagen - Ungültige Eingabedatei: {str(e)}"
+                
+            except ocrmypdf.exceptions.MissingDependencyError as e:
+                logger.error(f"OCRmyPDF Abhängigkeit fehlt: {e}")
+                if 'temp_output_path' in locals() and os.path.exists(temp_output_path):
+                    os.unlink(temp_output_path)
+                return False, f"PDF/A-Export fehlgeschlagen - Fehlende Abhängigkeit: {str(e)}"
+                
+            except ocrmypdf.exceptions.TesseractConfigError as e:
+                logger.error(f"Tesseract-Konfigurationsfehler: {e}")
+                if 'temp_output_path' in locals() and os.path.exists(temp_output_path):
+                    os.unlink(temp_output_path)
+                return False, f"PDF/A-Export fehlgeschlagen - Tesseract-Fehler: {str(e)}"
+                
+            except ocrmypdf.exceptions.PriorOcrFoundError as e:
+                logger.error(f"PDF enthält bereits OCR-Text: {e}")
+                if 'temp_output_path' in locals() and os.path.exists(temp_output_path):
+                    os.unlink(temp_output_path)
+                return False, f"PDF/A-Export fehlgeschlagen - PDF bereits mit OCR: {str(e)}"
+                
+            except Exception as e:
+                logger.exception(f"OCRmyPDF unerwarteter Fehler: {e}")
+                if 'temp_output_path' in locals() and os.path.exists(temp_output_path):
+                    os.unlink(temp_output_path)
+                return False, f"PDF/A-Export fehlgeschlagen - Unerwarteter Fehler: {str(e)}"
 
         except Exception as e:
             logger.exception("PDF/A-Export fehlgeschlagen")
-            # Letzter Fallback: Kopiere die Datei
-            output_file = os.path.join(export_path, f"{filename}.pdf")
-            output_file = self._get_unique_filename(output_file)
-            shutil.copy2(pdf_path, output_file)
-            return True, f"PDF exportiert (ohne Konvertierung): {os.path.basename(output_file)}"
+            return False, f"PDF/A-Export komplett fehlgeschlagen: {str(e)}"
 
     def _check_pdf_has_text(self, pdf_path: str) -> bool:
         """Prüft ob eine PDF bereits Text enthält"""

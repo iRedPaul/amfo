@@ -135,7 +135,9 @@ class HotfolderManager:
                 time.sleep(60)  # Bei Fehler länger warten
     
     def create_hotfolder(self, name: str, input_path: str,
-                        description: str = "", actions: Optional[List[str]] = None, 
+                        description: str = "",
+                        process_pairs: bool = True,
+                        actions: Optional[List[str]] = None, 
                         action_params: Optional[dict] = None, 
                         xml_field_mappings: Optional[List[Dict]] = None,
                         output_filename_expression: str = "<FileName>",
@@ -203,6 +205,7 @@ class HotfolderManager:
                 name=name,
                 input_path=input_path,
                 description=description,
+                process_pairs=process_pairs,
                 actions=action_enums,
                 action_params=action_params or {},
                 xml_field_mappings=xml_field_mappings,

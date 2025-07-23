@@ -539,7 +539,7 @@ class MainWindow:
         if result:
             success, message = self.manager.create_hotfolder(
                 name=str(result["name"] or ""), input_path=str(result["input_path"] or ""),
-                description=str(result.get("description", "") or ""), actions=result["actions"],
+                description=str(result.get("description", "") or ""), process_pairs=result["process_pairs"], actions=result["actions"],
                 action_params=result["action_params"], xml_field_mappings=result.get("xml_field_mappings", []),
                 output_filename_expression=str(result.get("output_filename_expression", "<FileName>") or "<FileName>"),
                 ocr_zones=result.get("ocr_zones", []), export_configs=result.get("export_configs", []),

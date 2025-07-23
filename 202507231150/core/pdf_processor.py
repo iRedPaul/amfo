@@ -26,7 +26,7 @@ from core.xml_field_processor import XMLFieldProcessor, FieldMapping
 from core.ocr_processor import OCRProcessor
 from core.export_processor import ExportProcessor
 from models.hotfolder_config import HotfolderConfig, ProcessingAction, DocumentPair
-from models.export_config import ExportSettings, ApplicationPaths
+from models.export_config import ExportSettings
 
 logger = logging.getLogger(__name__)
 
@@ -139,31 +139,23 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"Fehler beim Speichern der Einstellungen: {e}")
     
-    def _save_settings(self, settings: ExportSettings):
-        """Speichert Einstellungen"""
-        try:
-            settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "settings.json")
-            with open(settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings.to_dict(), f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Fehler beim Speichern der Einstellungen: {e}")
-    
     def _check_dependencies(self):
         """Prüft ob alle benötigten Abhängigkeiten verfügbar sind"""
-        errors = []
         warnings = []
+        
+        # Basis-Verzeichnis für dependencies
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        dependencies_dir = os.path.join(base_dir, 'dependencies')
         
         # Prüfe Ghostscript (nur für Komprimierung)
         if not self._is_ghostscript_available():
             warnings.append("Ghostscript nicht gefunden - PDF-Komprimierung nicht möglich")
-            if self.settings.application_paths.ghostscript:
-                warnings.append(f"Konfigurierter Ghostscript-Pfad ungültig: {self.settings.application_paths.ghostscript}")
+            warnings.append(f"Bitte Ghostscript im dependencies Ordner platzieren: {dependencies_dir}")
         
         # Prüfe Tesseract (für PDF/A-Export)
         if not self._is_tesseract_available():
             warnings.append("Tesseract nicht gefunden - PDF/A (Durchsuchbar) Export eingeschränkt")
-            if self.settings.application_paths.tesseract:
-                warnings.append(f"Konfigurierter Tesseract-Pfad ungültig: {self.settings.application_paths.tesseract}")
+            warnings.append(f"Bitte Tesseract im dependencies Ordner platzieren: {dependencies_dir}")
         
         # Prüfe OCRmyPDF (für PDF/A-Export)
         try:
@@ -173,27 +165,34 @@ class PDFProcessor:
         
         if warnings:
             logger.warning("Konfigurationswarnungen:\n" + "\n".join(warnings))
-        
-        if errors:
-            logger.error("Fehlende Abhängigkeiten:\n" + "\n".join(errors))
     
     def _is_tesseract_available(self) -> bool:
         """Prüft ob Tesseract verfügbar ist"""
-        # Prüfe zuerst konfigurierten Pfad
-        if self.settings.application_paths.tesseract:
-            tesseract_path = self.settings.application_paths.tesseract
-            if os.path.exists(tesseract_path):
-                try:
-                    result = subprocess.run([tesseract_path, "--version"], 
-                                          capture_output=True, check=True)
-                    if result.returncode == 0:
-                        self._tesseract_path = tesseract_path
-                        # Setze Umgebungsvariable für OCRmyPDF
-                        os.environ['TESSERACT_PATH'] = os.path.dirname(tesseract_path)
-                        logger.info(f"Tesseract aus Einstellungen geladen: {tesseract_path}")
-                        return True
-                except:
-                    logger.warning(f"Konfigurierter Tesseract-Pfad ungültig: {tesseract_path}")
+        # Basis-Verzeichnis für dependencies
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        dependencies_dir = os.path.join(base_dir, 'dependencies')
+        
+        # Prüfe dependencies Ordner
+        tesseract_path = os.path.join(dependencies_dir, 'Tesseract-OCR', 'tesseract.exe')
+        if os.path.exists(tesseract_path):
+            self._tesseract_path = tesseract_path
+            # Setze Umgebungsvariable für OCRmyPDF
+            os.environ['TESSERACT_PATH'] = os.path.dirname(tesseract_path)
+            logger.debug(f"Tesseract gefunden: {tesseract_path}")
+            return True
+        
+        # Prüfe Installation im Programmverzeichnis
+        program_paths = [
+            os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'belegpilot', 'dependencies', 'Tesseract-OCR', 'tesseract.exe'),
+            os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'belegpilot', 'dependencies', 'Tesseract-OCR', 'tesseract.exe')
+        ]
+        
+        for path in program_paths:
+            if os.path.exists(path):
+                self._tesseract_path = path
+                os.environ['TESSERACT_PATH'] = os.path.dirname(path)
+                logger.debug(f"Tesseract gefunden in Installationsverzeichnis: {path}")
+                return True
         
         # Fallback auf System-PATH
         try:
@@ -205,54 +204,40 @@ class PDFProcessor:
         except:
             pass
         
-        # Windows: Suche in typischen Pfaden
-        if os.name == 'nt':
-            possible_paths = [
-                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-                r"C:\Users\%USERNAME%\AppData\Local\Programs\Tesseract-OCR\tesseract.exe",
-                r"D:\Program Files\Tesseract-OCR\tesseract.exe",
-                r"D:\Tools\Tesseract-OCR\tesseract.exe",
-            ]
-            
-            username = os.environ.get('USERNAME', '')
-            possible_paths = [path.replace('%USERNAME%', username) for path in possible_paths]
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    try:
-                        result = subprocess.run([path, "--version"], 
-                                              capture_output=True, check=True)
-                        if result.returncode == 0:
-                            self._tesseract_path = path
-                            os.environ['TESSERACT_PATH'] = os.path.dirname(path)
-                            logger.info(f"Tesseract automatisch gefunden: {path}")
-                            
-                            # Speichere in Einstellungen für nächsten Start
-                            self.settings.application_paths.tesseract = path
-                            self._save_settings(self.settings)
-                            
-                            return True
-                    except:
-                        continue
-        
         return False
     
     def _is_ghostscript_available(self) -> bool:
         """Prüft ob Ghostscript verfügbar ist"""
-        # Prüfe zuerst konfigurierten Pfad
-        if self.settings.application_paths.ghostscript:
-            gs_path = self.settings.application_paths.ghostscript
-            if os.path.exists(gs_path):
-                try:
-                    result = subprocess.run([gs_path, '--version'], 
-                                          capture_output=True, text=True)
-                    if result.returncode == 0:
-                        self._ghostscript_path = gs_path
-                        logger.info(f"Ghostscript aus Einstellungen geladen: {gs_path}")
-                        return True
-                except:
-                    logger.warning(f"Konfigurierter Ghostscript-Pfad ungültig: {gs_path}")
+        # Basis-Verzeichnis für dependencies
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        dependencies_dir = os.path.join(base_dir, 'dependencies')
+        
+        # Prüfe dependencies Ordner mit Glob für verschiedene Versionen
+        import glob
+        gs_patterns = [
+            os.path.join(dependencies_dir, 'gs', 'gs*', 'bin', 'gswin64c.exe'),
+            os.path.join(dependencies_dir, 'gs', 'gs*', 'bin', 'gswin32c.exe'),
+        ]
+        
+        for pattern in gs_patterns:
+            for gs_path in glob.glob(pattern):
+                if os.path.exists(gs_path):
+                    self._ghostscript_path = gs_path
+                    logger.debug(f"Ghostscript gefunden: {gs_path}")
+                    return True
+        
+        # Prüfe Installation im Programmverzeichnis
+        program_patterns = [
+            os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'belegpilot', 'dependencies', 'gs', 'gs*', 'bin', 'gswin64c.exe'),
+            os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'belegpilot', 'dependencies', 'gs', 'gs*', 'bin', 'gswin32c.exe')
+        ]
+        
+        for pattern in program_patterns:
+            for gs_path in glob.glob(pattern):
+                if os.path.exists(gs_path):
+                    self._ghostscript_path = gs_path
+                    logger.debug(f"Ghostscript gefunden in Installationsverzeichnis: {gs_path}")
+                    return True
         
         # Standard-Prüfung
         try:
@@ -264,42 +249,9 @@ class PDFProcessor:
                                               capture_output=True, text=True)
                         if result.returncode == 0:
                             self._ghostscript_path = cmd
-                            
-                            # Versuche vollständigen Pfad zu finden und zu speichern
-                            where_result = subprocess.run(['where', cmd], 
-                                                        capture_output=True, text=True)
-                            if where_result.returncode == 0:
-                                full_path = where_result.stdout.strip().split('\n')[0]
-                                if os.path.exists(full_path):
-                                    self.settings.application_paths.ghostscript = full_path
-                                    self._save_settings(self.settings)
-                            
                             return True
                     except:
                         continue
-                        
-                # Suche in typischen Installationspfaden
-                possible_paths = [
-                    r"C:\Program Files\gs\gs*\bin\gswin64c.exe",
-                    r"C:\Program Files (x86)\gs\gs*\bin\gswin32c.exe",
-                ]
-                
-                import glob
-                for pattern in possible_paths:
-                    for path in glob.glob(pattern):
-                        if os.path.exists(path):
-                            try:
-                                result = subprocess.run([path, '--version'], 
-                                                      capture_output=True, text=True)
-                                if result.returncode == 0:
-                                    self._ghostscript_path = path
-                                    self.settings.application_paths.ghostscript = path
-                                    self._save_settings(self.settings)
-                                    logger.info(f"Ghostscript gefunden: {path}")
-                                    return True
-                            except:
-                                continue
-                
                 return False
             else:
                 # Unix/Linux
@@ -588,7 +540,7 @@ class PDFProcessor:
         """Intelligente PDF-Komprimierung basierend auf Dokumenttyp"""
         try:
             if not self._is_ghostscript_available():
-                raise Exception("Ghostscript nicht verfügbar")
+                raise Exception("Ghostscript nicht verfügbar - bitte im dependencies Ordner platzieren")
             
             original_size = os.path.getsize(pdf_path)
             pdf_info = params.get('pdf_info', {})

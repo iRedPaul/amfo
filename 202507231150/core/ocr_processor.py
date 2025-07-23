@@ -21,28 +21,11 @@ class OCRProcessor:
     """Führt OCR auf PDF-Dateien aus und extrahiert Text"""
 
     def __init__(self):
-        # Lade Einstellungen
-        self.settings = self._load_settings()
-        
         # Versuche Tesseract zu finden
         self._setup_tesseract()
         
         # Setze Poppler-Pfad
         self._setup_poppler()
-
-    def _load_settings(self):
-        """Lädt Einstellungen aus settings.json"""
-        try:
-            settings_file = "config/settings.json"
-            
-            if os.path.exists(settings_file):
-                with open(settings_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            else:
-                return {}
-        except Exception as e:
-            logger.error(f"Fehler beim Laden der Einstellungen: {e}")
-            return {}
 
     def _setup_tesseract(self):
         """Konfiguriert Tesseract OCR"""
@@ -50,38 +33,39 @@ class OCRProcessor:
         if os.name == 'nt':
             os.environ['TESSERACT_DISABLE_DEBUG_CONSOLE'] = '1'
         
-        # Prüfe zuerst konfigurierten Pfad aus settings.json
-        if self.settings.get('application_paths', {}).get('tesseract'):
-            tesseract_path = self.settings['application_paths']['tesseract']
-            if os.path.exists(tesseract_path):
-                pytesseract.pytesseract.tesseract_cmd = tesseract_path
-                
-                # Konfiguriere pytesseract für Windows ohne Konsolen-Fenster
-                if os.name == 'nt':
-                    try:
-                        import subprocess
-                        
-                        # Erstelle STARTUPINFO für versteckte Fenster
-                        si = subprocess.STARTUPINFO()
-                        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        si.wShowWindow = subprocess.SW_HIDE
-                        
-                        # Monkey-patch pytesseract.run_tesseract
-                        original_run_tesseract = pytesseract.pytesseract.run_tesseract
-                        
-                        def run_tesseract_no_console(*args, **kwargs):
-                            kwargs['startupinfo'] = si
-                            return original_run_tesseract(*args, **kwargs)
-                        
-                        pytesseract.pytesseract.run_tesseract = run_tesseract_no_console
-                        logger.debug("Tesseract für versteckte Konsolen konfiguriert")
-                    except Exception as e:
-                        logger.debug(f"Konnte Tesseract-Konsolen nicht verstecken: {e}")
-                
-                logger.info(f"Tesseract aus Einstellungen geladen: {tesseract_path}")
-                return
-            else:
-                logger.warning(f"Konfigurierter Tesseract-Pfad ungültig: {tesseract_path}")
+        # Basis-Verzeichnis für dependencies
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        dependencies_dir = os.path.join(base_dir, 'dependencies')
+        
+        # Prüfe dependencies Ordner zuerst
+        tesseract_path = os.path.join(dependencies_dir, 'Tesseract-OCR', 'tesseract.exe')
+        if os.path.exists(tesseract_path):
+            pytesseract.pytesseract.tesseract_cmd = tesseract_path
+            
+            # Konfiguriere pytesseract für Windows ohne Konsolen-Fenster
+            if os.name == 'nt':
+                try:
+                    import subprocess
+                    
+                    # Erstelle STARTUPINFO für versteckte Fenster
+                    si = subprocess.STARTUPINFO()
+                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    si.wShowWindow = subprocess.SW_HIDE
+                    
+                    # Monkey-patch pytesseract.run_tesseract
+                    original_run_tesseract = pytesseract.pytesseract.run_tesseract
+                    
+                    def run_tesseract_no_console(*args, **kwargs):
+                        kwargs['startupinfo'] = si
+                        return original_run_tesseract(*args, **kwargs)
+                    
+                    pytesseract.pytesseract.run_tesseract = run_tesseract_no_console
+                    logger.debug("Tesseract für versteckte Konsolen konfiguriert")
+                except Exception as e:
+                    logger.debug(f"Konnte Tesseract-Konsolen nicht verstecken: {e}")
+            
+            logger.debug(f"Tesseract gefunden: {tesseract_path}")
+            return
         
         # Prüfe Installation im Programmverzeichnis (nach Installation)
         program_paths = [
@@ -92,7 +76,7 @@ class OCRProcessor:
         for path in program_paths:
             if os.path.exists(path):
                 pytesseract.pytesseract.tesseract_cmd = path
-                logger.info(f"Tesseract gefunden in Installationsverzeichnis: {path}")
+                logger.debug(f"Tesseract gefunden in Installationsverzeichnis: {path}")
                 return
         
         # Standard-Pfade für Tesseract auf Windows
@@ -110,21 +94,22 @@ class OCRProcessor:
                 return
 
         # Wenn nicht gefunden, hoffen wir dass es im PATH ist
-        logger.warning("Tesseract nicht in Standard-Pfaden gefunden. Stelle sicher, dass es installiert ist.")
+        logger.warning("Tesseract nicht gefunden. Bitte im dependencies Ordner platzieren.")
 
     def _setup_poppler(self):
         """Konfiguriert Poppler-Pfad"""
         self.poppler_path = None
         
-        # Prüfe zuerst konfigurierten Pfad aus settings.json
-        if self.settings.get('application_paths', {}).get('poppler'):
-            poppler_path = self.settings['application_paths']['poppler']
-            if os.path.exists(poppler_path):
-                self.poppler_path = poppler_path
-                logger.info(f"Poppler aus Einstellungen geladen: {poppler_path}")
-                return
-            else:
-                logger.warning(f"Konfigurierter Poppler-Pfad ungültig: {poppler_path}")
+        # Basis-Verzeichnis für dependencies
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        dependencies_dir = os.path.join(base_dir, 'dependencies')
+        
+        # Prüfe dependencies Ordner zuerst
+        poppler_path = os.path.join(dependencies_dir, 'poppler', 'bin')
+        if os.path.exists(poppler_path):
+            self.poppler_path = poppler_path
+            logger.debug(f"Poppler gefunden: {poppler_path}")
+            return
         
         # Prüfe Installation im Programmverzeichnis (nach Installation)
         program_paths = [
@@ -135,26 +120,10 @@ class OCRProcessor:
         for path in program_paths:
             if os.path.exists(path):
                 self.poppler_path = path
-                logger.info(f"Poppler gefunden in Installationsverzeichnis: {path}")
+                logger.debug(f"Poppler gefunden in Installationsverzeichnis: {path}")
                 return
         
-        # Prüfe relativen Pfad (für Entwicklung)
-        relative_path = os.path.join(os.path.dirname(__file__), '..', 'dependencies', 'poppler', 'bin')
-        relative_path = os.path.normpath(relative_path)
-        if os.path.exists(relative_path):
-            self.poppler_path = relative_path
-            logger.info(f"Poppler gefunden (relativ): {relative_path}")
-            return
-        
-        # Fallback auf alten relativen Pfad
-        old_relative_path = os.path.join(os.path.dirname(__file__), '..', 'poppler', 'bin')
-        old_relative_path = os.path.normpath(old_relative_path)
-        if os.path.exists(old_relative_path):
-            self.poppler_path = old_relative_path
-            logger.info(f"Poppler gefunden (alter relativer Pfad): {old_relative_path}")
-            return
-        
-        logger.error("Poppler nicht gefunden! PDF zu Bild Konvertierung wird fehlschlagen.")
+        logger.error("Poppler nicht gefunden! Bitte im dependencies Ordner platzieren.")
 
     def _get_poppler_path(self):
         """Gibt den Poppler-Pfad zurück oder None"""
@@ -206,7 +175,7 @@ class OCRProcessor:
                 
                 # Prüfe ob Poppler existiert
                 if not poppler_path or not os.path.exists(poppler_path):
-                    logger.error(f"Poppler nicht gefunden. Bitte überprüfen Sie die Einstellungen.")
+                    logger.error(f"Poppler nicht gefunden. Bitte im dependencies Ordner platzieren.")
                     return ""
                 
                 # Konvertiere mit explizitem poppler_path Parameter
@@ -256,7 +225,7 @@ class OCRProcessor:
             
             # Prüfe ob Poppler existiert
             if not poppler_path or not os.path.exists(poppler_path):
-                logger.error(f"Poppler nicht gefunden. Bitte überprüfen Sie die Einstellungen.")
+                logger.error(f"Poppler nicht gefunden. Bitte im dependencies Ordner platzieren.")
                 return ""
             
             images = convert_from_path(

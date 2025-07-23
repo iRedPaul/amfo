@@ -105,29 +105,6 @@ class ExportConfig:
 
 
 @dataclass
-class ApplicationPaths:
-    """Anwendungspfade für externe Programme"""
-    tesseract: str = ""
-    ghostscript: str = ""
-    poppler: str = ""
-    
-    def to_dict(self) -> dict:
-        return {
-            "tesseract": self.tesseract,
-            "ghostscript": self.ghostscript,
-            "poppler": self.poppler
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict) -> 'ApplicationPaths':
-        return cls(
-            tesseract=data.get("tesseract", ""),
-            ghostscript=data.get("ghostscript", ""),
-            poppler=data.get("poppler", "")
-        )
-
-
-@dataclass
 class ExportSettings:
     """Globale Export-Einstellungen"""
     # E-Mail Einstellungen
@@ -152,9 +129,6 @@ class ExportSettings:
     default_export_path: str = ""
     default_error_path: str = ""
     
-    # Anwendungspfade
-    application_paths: ApplicationPaths = field(default_factory=ApplicationPaths)
-    
     # OCR-Einstellungen
     ocr_default_language: str = "deu"
     ocr_additional_languages: List[str] = field(default_factory=lambda: ["eng"])
@@ -162,8 +136,6 @@ class ExportSettings:
     def __post_init__(self):
         if isinstance(self.smtp_auth_method, str):
             self.smtp_auth_method = AuthMethod(self.smtp_auth_method)
-        if isinstance(self.application_paths, dict):
-            self.application_paths = ApplicationPaths.from_dict(self.application_paths)
     
     def to_dict(self) -> dict:
         return {
@@ -183,7 +155,6 @@ class ExportSettings:
             "oauth2_token_expiry": self.oauth2_token_expiry,
             "default_export_path": self.default_export_path,
             "default_error_path": self.default_error_path,
-            "application_paths": self.application_paths.to_dict(),
             "ocr_default_language": self.ocr_default_language,
             "ocr_additional_languages": self.ocr_additional_languages
         }
@@ -210,11 +181,6 @@ class ExportSettings:
         # Erstelle Settings-Objekt
         settings = cls(**clean_data)
         
-        # Behandle application_paths separat
-        if 'application_paths' in data:
-            settings.application_paths = ApplicationPaths.from_dict(data['application_paths'])
-        elif 'paths' in data:
-            # Fallback für alte settings.json mit "paths" statt "application_paths"
-            settings.application_paths = ApplicationPaths.from_dict(data['paths'])
+        # Ignoriere application_paths - wird nicht mehr verwendet
         
         return settings

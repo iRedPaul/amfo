@@ -1,6 +1,5 @@
 """
-belegpilot
-Hauptprogramm
+belegpilot - Konfigurations-Tool
 """
 import sys
 import os
@@ -70,6 +69,10 @@ def main():
         
         # Zeige Lizenzwarnung falls nötig
         show_license_warning()
+        
+        # WICHTIGE ÄNDERUNG:
+        # Der HotfolderManager wird hier nicht mehr gestartet.
+        # Die MainWindow dient nur noch der Konfiguration des Dienstes.
         
         # Erstelle und starte die Anwendung
         app = MainWindow()

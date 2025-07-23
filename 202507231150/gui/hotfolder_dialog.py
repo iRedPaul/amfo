@@ -47,7 +47,7 @@ class HotfolderDialog:
         self.name_var = tk.StringVar(value=hotfolder.name if hotfolder else "")
         self.description_var = tk.StringVar(value=hotfolder.description if hotfolder and hasattr(hotfolder, 'description') else "")
         self.input_path_var = tk.StringVar(value=hotfolder.input_path if hotfolder else "")
-        self.process_pairs_var = tk.BooleanVar(value=hotfolder.process_pairs if hotfolder else True)
+        self.process_pairs_var = tk.BooleanVar(value=hotfolder.process_pairs if hotfolder else False)
         
         # Action Variablen - OCR wurde entfernt
         self.action_vars = {}

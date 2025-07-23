@@ -8,12 +8,10 @@ import sys
 import os
 import json
 import logging
-import subprocess
-import glob
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.export_config import ExportSettings, AuthMethod, ApplicationPaths
+from models.export_config import ExportSettings, AuthMethod
 from gui.oauth2_setup_dialog import OAuth2SetupDialog
 from core.license_manager import get_license_manager
 
@@ -65,17 +63,11 @@ class SettingsDialog:
     def _ensure_default_error_path(self):
         """Stellt sicher, dass ein Standard-Fehlerordner existiert"""
         if not self.settings.default_error_path:
-            # Erstelle Standard-Fehlerordner in AppData
-            appdata = os.getenv('APPDATA')
-            if appdata:
-                default_error_path = os.path.join(appdata, 'HotfolderPDFProcessor', 'errors')
-                os.makedirs(default_error_path, exist_ok=True)
-                self.settings.default_error_path = default_error_path
-            else:
-                # Fallback: Im Programmverzeichnis
-                default_error_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'errors')
-                os.makedirs(default_error_path, exist_ok=True)
-                self.settings.default_error_path = default_error_path
+            # Erstelle Standard-Fehlerordner im Hauptverzeichnis
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            default_error_path = os.path.join(base_dir, 'error')
+            os.makedirs(default_error_path, exist_ok=True)
+            self.settings.default_error_path = default_error_path
     
     def _load_settings(self) -> ExportSettings:
         """Lädt die Einstellungen aus der Datei"""
@@ -215,10 +207,6 @@ class SettingsDialog:
                                            text="E-Mail-Einstellungen testen...", 
                                            command=self._test_email)
         
-        # Anwendungspfade-Tab
-        self.paths_frame = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(self.paths_frame, text="Anwendungspfade")
-        
         # Lizenz-Tab
         self.license_frame = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.license_frame, text="Lizenz")
@@ -256,48 +244,6 @@ class SettingsDialog:
                  "3. Sie erhalten eine Lizenzdatei zurück\n"
                  "4. Installieren Sie die Lizenz mit 'Lizenz installieren'",
             wraplength=500, justify=tk.LEFT)
-        
-        # Pfade-Einstellungen
-        self.paths_info_label = ttk.Label(
-            self.paths_frame,
-            text="Konfigurieren Sie die Pfade zu den benötigten Anwendungen.\n" +
-                 "Lassen Sie ein Feld leer, um die automatische Erkennung zu verwenden.",
-            wraplength=550
-        )
-        
-        # Tesseract
-        self.tesseract_frame = ttk.LabelFrame(self.paths_frame, text="Tesseract OCR", padding="10")
-        self.tesseract_path_var = tk.StringVar()
-        self.tesseract_entry = ttk.Entry(self.tesseract_frame, textvariable=self.tesseract_path_var, width=50)
-        self.tesseract_browse_btn = ttk.Button(self.tesseract_frame, text="Durchsuchen...", 
-                                              command=lambda: self._browse_app_path('tesseract'))
-        self.tesseract_auto_btn = ttk.Button(self.tesseract_frame, text="Auto-Erkennung", 
-                                            command=lambda: self._auto_detect_path('tesseract'))
-        self.tesseract_status_label = ttk.Label(self.tesseract_frame, text="")
-        
-        # Ghostscript
-        self.ghostscript_frame = ttk.LabelFrame(self.paths_frame, text="Ghostscript", padding="10")
-        self.ghostscript_path_var = tk.StringVar()
-        self.ghostscript_entry = ttk.Entry(self.ghostscript_frame, textvariable=self.ghostscript_path_var, width=50)
-        self.ghostscript_browse_btn = ttk.Button(self.ghostscript_frame, text="Durchsuchen...", 
-                                                command=lambda: self._browse_app_path('ghostscript'))
-        self.ghostscript_auto_btn = ttk.Button(self.ghostscript_frame, text="Auto-Erkennung", 
-                                              command=lambda: self._auto_detect_path('ghostscript'))
-        self.ghostscript_status_label = ttk.Label(self.ghostscript_frame, text="")
-        
-        # Poppler
-        self.poppler_frame = ttk.LabelFrame(self.paths_frame, text="Poppler (für Bild-Export)", padding="10")
-        self.poppler_path_var = tk.StringVar()
-        self.poppler_entry = ttk.Entry(self.poppler_frame, textvariable=self.poppler_path_var, width=50)
-        self.poppler_browse_btn = ttk.Button(self.poppler_frame, text="Durchsuchen...", 
-                                            command=lambda: self._browse_app_path('poppler'))
-        self.poppler_auto_btn = ttk.Button(self.poppler_frame, text="Auto-Erkennung", 
-                                          command=lambda: self._auto_detect_path('poppler'))
-        self.poppler_status_label = ttk.Label(self.poppler_frame, text="")
-        
-        # Test-Button für alle Pfade
-        self.paths_test_button = ttk.Button(self.paths_frame, text="Alle Pfade testen", 
-                                           command=self._test_all_paths)
         
         # Buttons
         self.button_frame = ttk.Frame(self.main_frame)
@@ -359,39 +305,6 @@ class SettingsDialog:
         # Test-Button
         self.email_test_button.pack(anchor=tk.W)
         
-        # Anwendungspfade Layout
-        self.paths_info_label.pack(fill=tk.X, pady=(0, 20))
-        
-        # Tesseract
-        self.tesseract_frame.pack(fill=tk.X, pady=(0, 10))
-        self.tesseract_entry.pack(fill=tk.X)
-        tesseract_btn_frame = ttk.Frame(self.tesseract_frame)
-        tesseract_btn_frame.pack(fill=tk.X, pady=(5, 0))
-        self.tesseract_browse_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.tesseract_auto_btn.pack(side=tk.LEFT)
-        self.tesseract_status_label.pack(anchor=tk.W, pady=(5, 0))
-        
-        # Ghostscript
-        self.ghostscript_frame.pack(fill=tk.X, pady=(0, 10))
-        self.ghostscript_entry.pack(fill=tk.X)
-        ghostscript_btn_frame = ttk.Frame(self.ghostscript_frame)
-        ghostscript_btn_frame.pack(fill=tk.X, pady=(5, 0))
-        self.ghostscript_browse_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.ghostscript_auto_btn.pack(side=tk.LEFT)
-        self.ghostscript_status_label.pack(anchor=tk.W, pady=(5, 0))
-        
-        # Poppler
-        self.poppler_frame.pack(fill=tk.X, pady=(0, 10))
-        self.poppler_entry.pack(fill=tk.X)
-        poppler_btn_frame = ttk.Frame(self.poppler_frame)
-        poppler_btn_frame.pack(fill=tk.X, pady=(5, 0))
-        self.poppler_browse_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.poppler_auto_btn.pack(side=tk.LEFT)
-        self.poppler_status_label.pack(anchor=tk.W, pady=(5, 0))
-        
-        # Test-Button
-        self.paths_test_button.pack(pady=(20, 0))
-        
         # Buttons
         self.button_frame.pack(fill=tk.X)
         self.cancel_button.pack(side=tk.RIGHT, padx=(5, 0))
@@ -427,12 +340,6 @@ class SettingsDialog:
         self.auth_method_var.set(self.settings.smtp_auth_method.value)
         self.oauth2_provider_var.set(self.settings.oauth2_provider.capitalize() if self.settings.oauth2_provider else "Gmail")
         
-        # Anwendungspfade laden
-        if hasattr(self.settings, 'application_paths'):
-            self.tesseract_path_var.set(self.settings.application_paths.tesseract or "")
-            self.ghostscript_path_var.set(self.settings.application_paths.ghostscript or "")
-            self.poppler_path_var.set(self.settings.application_paths.poppler or "")
-        
         # Update OAuth2 Status
         self._update_oauth2_status()
         
@@ -441,9 +348,6 @@ class SettingsDialog:
         
         # Lade Lizenzinfo
         self.dialog.after(100, self._load_license_info)
-        
-        # Teste Pfade beim Laden
-        self.dialog.after(100, self._test_all_paths)
     
     def _update_oauth2_status(self):
         """Aktualisiert den OAuth2-Status in der UI"""
@@ -475,157 +379,6 @@ class SettingsDialog:
         )
         if folder:
             self.error_path_var.set(folder)
-    
-    def _browse_app_path(self, app_name: str):
-        """Öffnet Dialog zur Auswahl eines Anwendungspfads"""
-        if app_name == 'poppler':
-            # Ordner-Auswahl für Poppler
-            path = filedialog.askdirectory(
-                title="Poppler bin-Ordner auswählen",
-                initialdir=self.poppler_path_var.get() or os.path.expanduser("~")
-            )
-            if path:
-                self.poppler_path_var.set(path)
-        else:
-            # Datei-Auswahl für ausführbare Dateien
-            filetypes = [("Ausführbare Dateien", "*.exe"), ("Alle Dateien", "*.*")] if os.name == 'nt' else [("Alle Dateien", "*.*")]
-            
-            title = "Tesseract ausführbare Datei auswählen" if app_name == 'tesseract' else "Ghostscript ausführbare Datei auswählen"
-            
-            filename = filedialog.askopenfilename(
-                title=title,
-                filetypes=filetypes,
-                initialdir=os.path.dirname(getattr(self, f"{app_name}_path_var").get()) or os.path.expanduser("~")
-            )
-            
-            if filename:
-                getattr(self, f"{app_name}_path_var").set(filename)
-        
-        # Teste den neuen Pfad
-        self._test_single_path(app_name)
-    
-    def _auto_detect_path(self, app_name: str):
-        """Versucht einen Anwendungspfad automatisch zu erkennen"""
-        path = None
-        
-        if app_name == "tesseract":
-            if os.name == 'nt':
-                possible_paths = [
-                    r"C:\Program Files\belegpilot\dependencies\Tesseract-OCR\tesseract.exe",
-                    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-                    r"D:\Program Files\Tesseract-OCR\tesseract.exe",
-                ]
-                
-                for p in possible_paths:
-                    if os.path.exists(p):
-                        path = p
-                        break
-            else:
-                # Linux/Mac
-                result = subprocess.run(['which', 'tesseract'], capture_output=True, text=True)
-                if result.returncode == 0:
-                    path = result.stdout.strip()
-        
-        elif app_name == "ghostscript":
-            if os.name == 'nt':
-                patterns = [
-                    r"C:\Program Files\belegpilot\dependencies\gs\gs*\bin\gswin64c.exe",
-                    r"C:\Program Files\gs\gs*\bin\gswin64c.exe",
-                    r"C:\Program Files (x86)\gs\gs*\bin\gswin32c.exe",
-                ]
-                
-                for pattern in patterns:
-                    for p in glob.glob(pattern):
-                        if os.path.exists(p):
-                            path = p
-                            break
-                    if path:
-                        break
-            else:
-                result = subprocess.run(['which', 'gs'], capture_output=True, text=True)
-                if result.returncode == 0:
-                    path = result.stdout.strip()
-        
-        elif app_name == "poppler":
-            if os.name == 'nt':
-                possible_paths = [
-                    # Im Programmverzeichnis
-                    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'poppler', 'bin'),
-                    # Belegpilot dependencies
-                    r"C:\Program Files\belegpilot\dependencies\poppler\bin",
-                ]
-                
-                for p in possible_paths:
-                    if os.path.exists(p):
-                        path = p
-                        break
-            else:
-                # Linux/Mac
-                result = subprocess.run(['which', 'pdftoppm'], capture_output=True, text=True)
-                if result.returncode == 0:
-                    path = os.path.dirname(result.stdout.strip())
-        
-        if path:
-            getattr(self, f"{app_name}_path_var").set(path)
-            messagebox.showinfo("Auto-Erkennung", f"{app_name.capitalize()} gefunden:\n{path}")
-            self._test_single_path(app_name)
-        else:
-            messagebox.showwarning("Auto-Erkennung", f"{app_name.capitalize()} konnte nicht automatisch gefunden werden.")
-    
-    def _test_single_path(self, app_name: str):
-        """Testet einen einzelnen Anwendungspfad"""
-        path = getattr(self, f"{app_name}_path_var").get()
-        status_label = getattr(self, f"{app_name}_status_label")
-        
-        if not path:
-            status_label.config(text="ℹ Kein Pfad konfiguriert (Auto-Erkennung)", foreground="blue")
-            return
-        
-        if app_name == "tesseract":
-            if os.path.exists(path):
-                try:
-                    result = subprocess.run([path, "--version"], capture_output=True, text=True)
-                    if result.returncode == 0:
-                        version = result.stdout.split('\n')[0]
-                        status_label.config(text=f"✓ {version}", foreground="green")
-                    else:
-                        status_label.config(text="✗ Pfad ungültig", foreground="red")
-                except Exception as e:
-                    status_label.config(text=f"✗ Fehler: {str(e)}", foreground="red")
-            else:
-                status_label.config(text="✗ Pfad existiert nicht", foreground="red")
-        
-        elif app_name == "ghostscript":
-            if os.path.exists(path):
-                try:
-                    result = subprocess.run([path, "--version"], capture_output=True, text=True)
-                    if result.returncode == 0:
-                        version = result.stdout.strip()
-                        status_label.config(text=f"✓ Version {version}", foreground="green")
-                    else:
-                        status_label.config(text="✗ Pfad ungültig", foreground="red")
-                except Exception as e:
-                    status_label.config(text=f"✗ Fehler: {str(e)}", foreground="red")
-            else:
-                status_label.config(text="✗ Pfad existiert nicht", foreground="red")
-        
-        elif app_name == "poppler":
-            if os.path.exists(path):
-                # Prüfe ob wichtige Dateien vorhanden sind
-                pdftoppm = os.path.join(path, 'pdftoppm.exe' if os.name == 'nt' else 'pdftoppm')
-                if os.path.exists(pdftoppm):
-                    status_label.config(text="✓ Pfad gültig", foreground="green")
-                else:
-                    status_label.config(text="✗ Keine Poppler-Tools gefunden", foreground="red")
-            else:
-                status_label.config(text="✗ Pfad existiert nicht", foreground="red")
-    
-    def _test_all_paths(self):
-        """Testet alle konfigurierten Pfade"""
-        self._test_single_path('tesseract')
-        self._test_single_path('ghostscript')
-        self._test_single_path('poppler')
     
     def _on_auth_method_changed(self):
         """Wird aufgerufen wenn die Auth-Methode geändert wird"""
@@ -767,8 +520,6 @@ class SettingsDialog:
                 license_type = license_info.get("type", "unbekannt")
                 self.license_type_label.config(text=f"Typ: {license_type.upper()}")
                 
-                # ENTFERNT: Kunde-Zeile
-                
                 # Zeige Ablaufdatum
                 if "days_remaining" in license_info:
                     days = license_info["days_remaining"]
@@ -865,7 +616,6 @@ class SettingsDialog:
             except Exception as e:
                 messagebox.showerror("Fehler", f"Fehler beim Entfernen der Lizenz:\n{str(e)}")
     
-    
     def _validate(self) -> bool:
         """Validiert die Eingaben"""
         # Fehlerordner ist Pflichtfeld
@@ -907,14 +657,6 @@ class SettingsDialog:
         # OAuth2-Provider nur updaten wenn OAuth2 ausgewählt
         if self.auth_method_var.get() == AuthMethod.OAUTH2.value:
             self.settings.oauth2_provider = self.oauth2_provider_var.get().lower()
-        
-        # Anwendungspfade aktualisieren
-        if not hasattr(self.settings, 'application_paths'):
-            self.settings.application_paths = ApplicationPaths()
-        
-        self.settings.application_paths.tesseract = self.tesseract_path_var.get()
-        self.settings.application_paths.ghostscript = self.ghostscript_path_var.get()
-        self.settings.application_paths.poppler = self.poppler_path_var.get()
         
         # Speichere in Datei
         self._save_settings()
@@ -1099,10 +841,10 @@ belegpilot"""
             # Verbinde zum Server
             if self.smtp_config['use_ssl'] and self.smtp_config['port'] == 465:
                 # SSL direkt verwenden
-                context = ssl.create_default_context()
+                context_ssl = ssl.create_default_context()
                 server = smtplib.SMTP_SSL(self.smtp_config['server'], 
                                          self.smtp_config['port'], 
-                                         context=context)
+                                         context=context_ssl)
             else:
                 # Standard SMTP mit optionalem STARTTLS
                 server = smtplib.SMTP(self.smtp_config['server'], self.smtp_config['port'])

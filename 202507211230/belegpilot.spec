@@ -84,6 +84,9 @@ hiddenimports = [
     'os',
     'sys',
     're',
+
+    # Wichtig für den Windows Dienst
+    'win32timezone'
 ]
 
 # Daten-Dateien
@@ -113,8 +116,46 @@ hiddenimports += tmp_ret[2]
 tmp_ret = collect_data_files('reportlab')
 datas += tmp_ret
 
-# Analyse-Einstellungen
-a = Analysis(
+# --- ERSTE EXE: Der Windows-Dienst ---
+a_service = Analysis(
+    ['belegpilot_service.py'],
+    pathex=[],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        'matplotlib', 'numpy', 'pandas', 'scipy', 'IPython', 'jupyter', 'notebook',
+        'tkinter', 'gui' # GUI-Module werden für den Dienst nicht benötigt
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+pyz_service = PYZ(a_service.pure, a_service.zipped_data, cipher=block_cipher)
+exe_service = EXE(
+    pyz_service,
+    a_service.scripts,
+    a_service.binaries,
+    a_service.zipfiles,
+    a_service.datas,
+    [],
+    name='belegpilot_service',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    runtime_tmpdir=None,
+    console=True,  # WICHTIG: Muss für die Dienst-Steuerung auf True sein
+    icon=None,
+    uac_admin=True
+)
+
+# --- ZWEITE EXE: Das Konfigurations-Tool (GUI) ---
+a_gui = Analysis(
     ['main.py'],
     pathex=[],
     binaries=binaries,
@@ -124,46 +165,28 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'matplotlib',
-        'numpy',
-        'pandas',
-        'scipy',
-        'IPython',
-        'jupyter',
-        'notebook',
+        'matplotlib', 'numpy', 'pandas', 'scipy', 'IPython', 'jupyter', 'notebook',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
-
-# Erstelle PYZ-Archiv
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
-# EXE-Einstellungen für SINGLE FILE
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+pyz_gui = PYZ(a_gui.pure, a_gui.zipped_data, cipher=block_cipher)
+exe_gui = EXE(
+    pyz_gui,
+    a_gui.scripts,
+    a_gui.binaries,
+    a_gui.zipfiles,
+    a_gui.datas,
     [],
     name='belegpilot',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # Kein Konsolenfenster für GUI-Anwendung
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon='gui/assets/icon.ico',  # Icon hinzugefügt
-    version_file=None,
-    uac_admin=True,  # Admin-Rechte anfordern
-    uac_uiaccess=False,
+    console=False,  # Kein Konsolenfenster für die GUI-Anwendung
+    icon='gui/assets/icon.ico',
+    uac_admin=True
 )

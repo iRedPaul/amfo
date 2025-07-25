@@ -1,5 +1,5 @@
 """
-Dialog zum Erstellen und Bearbeiten von Hotfoldern - Vereinfachte Version
+Dialog zum Erstellen und Bearbeiten von Hotfoldern
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -17,6 +17,7 @@ from gui.zone_selector import ZoneSelector
 from gui.expression_dialog import ExpressionDialog
 from gui.export_dialog import ExportEditDialog
 from gui.compress_settings_dialog import CompressSettingsDialog
+from core.license_manager import get_license_manager
 
 # Logger für dieses Modul
 logger = logging.getLogger(__name__)
@@ -872,6 +873,15 @@ class HotfolderDialog:
         if not self._validate():
             return
         
+        # Prüfe Lizenz wenn es ein neuer Hotfolder ist
+        if not self.hotfolder:  # Neuer Hotfolder
+            license_manager = get_license_manager()
+            if not license_manager.is_licensed():
+                messagebox.showerror("Keine gültige Lizenz", 
+                    "Sie können ohne gültige Lizenz keine neuen Hotfolder erstellen.\n\n"
+                    "Bitte installieren Sie eine gültige Lizenz über die Einstellungen.")
+                return
+        
         # Sammle ausgewählte Aktionen
         selected_actions = [action.value for action, var in self.action_vars.items() 
                            if var.get()]
@@ -887,11 +897,12 @@ class HotfolderDialog:
             "actions": selected_actions,
             "action_params": self.action_params,
             "xml_field_mappings": self.xml_field_mappings,
-            "output_filename_expression": "<FileName>",  # Default für Legacy
+            "output_filename_expression": "<FileName>",
             "ocr_zones": self.ocr_zones,
             "export_configs": self.export_configs,
             "stamp_configs": self.stamp_configs,
-            "error_path": self.error_path_var.get().strip()
+            "error_path": self.error_path_var.get().strip(),
+            "enabled": False
         }
         
         self.dialog.destroy()

@@ -46,11 +46,6 @@ class MainWindow:
         # Lade Hotfolder-Daten
         self._refresh_list()
 
-        # Starte Manager und prüfe, ob ein GUI-Update nötig ist
-        license_deactivated = self.manager.start()
-        if license_deactivated:
-            self.root.after(100, self._refresh_list)
-
         # Binde Events
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         self._bind_keyboard_shortcuts()

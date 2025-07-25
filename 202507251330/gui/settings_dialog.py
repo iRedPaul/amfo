@@ -14,6 +14,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.export_config import ExportSettings, AuthMethod
 from gui.oauth2_setup_dialog import OAuth2SetupDialog
 from core.license_manager import get_license_manager
+from core.hotfolder_manager import HotfolderManager
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)  # GUI-Komponenten nur INFO und höher
@@ -591,6 +593,18 @@ class SettingsDialog:
             success, message = license_manager.install_license(license_data)
             
             if success:
+                # Benachrichtige den Dienst über die Änderung
+                try:
+                    import socket
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(2)
+                        s.connect(('localhost', 12345))
+                        s.send(b'RELOAD')
+                    logger.info("Dienst wurde über Lizenzinstallation benachrichtigt")
+                except Exception as e:
+                    logger.debug(f"Dienst-Benachrichtigung fehlgeschlagen: {e}")
+                    # Dienst läuft möglicherweise nicht - das ist OK
+                
                 messagebox.showinfo("Erfolg", message)
                 self._load_license_info()
             else:
@@ -603,13 +617,45 @@ class SettingsDialog:
         """Entfernt die aktuelle Lizenz"""
         result = messagebox.askyesno("Lizenz entfernen", 
             "Möchten Sie die aktuelle Lizenz wirklich entfernen?\n\n"
+            "WARNUNG: Alle aktiven Hotfolder werden deaktiviert!\n"
             "Das Programm kann ohne gültige Lizenz nicht verwendet werden.")
         
         if result:
             try:
                 license_manager = get_license_manager()
                 if license_manager.remove_license():
-                    messagebox.showinfo("Erfolg", "Lizenz wurde entfernt.")
+                    # Deaktiviere alle Hotfolder
+                    config_manager = ConfigManager()
+                    deactivated_count = 0
+                    
+                    for hotfolder in config_manager.hotfolders:
+                        if hotfolder.enabled:
+                            hotfolder.enabled = False
+                            deactivated_count += 1
+                            logger.info(f"Hotfolder '{hotfolder.name}' wurde wegen Lizenzentfernung deaktiviert")
+                    
+                    # Speichere Änderungen wenn welche deaktiviert wurden
+                    if deactivated_count > 0:
+                        config_manager.save_config()
+                        logger.info(f"{deactivated_count} Hotfolder wurden deaktiviert")
+                    
+                    # Benachrichtige den Dienst über die Änderung
+                    try:
+                        import socket
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.settimeout(2)
+                            s.connect(('localhost', 12345))
+                            s.send(b'RELOAD')
+                    except:
+                        pass  # Dienst läuft möglicherweise nicht
+                    
+                    if deactivated_count > 0:
+                        messagebox.showinfo("Erfolg", 
+                            f"Lizenz wurde entfernt.\n\n"
+                            f"{deactivated_count} Hotfolder wurden deaktiviert.")
+                    else:
+                        messagebox.showinfo("Erfolg", "Lizenz wurde entfernt.")
+                        
                     self._load_license_info()
                 else:
                     messagebox.showerror("Fehler", "Lizenz konnte nicht entfernt werden.")
@@ -660,6 +706,18 @@ class SettingsDialog:
         
         # Speichere in Datei
         self._save_settings()
+        
+        # Benachrichtige den Dienst über die Änderung
+        try:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2)
+                s.connect(('localhost', 12345))
+                s.send(b'RELOAD')
+            logger.info("Dienst wurde über Settings-Änderung benachrichtigt")
+        except Exception as e:
+            logger.debug(f"Dienst-Benachrichtigung fehlgeschlagen: {e}")
+            # Dienst läuft möglicherweise nicht - das ist OK
         
         self.result = True
         self.dialog.destroy()

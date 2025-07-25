@@ -925,7 +925,7 @@ class ExportProcessor:
         if settings.default_error_path:
             return settings.default_error_path
 
-        # Fallback auf Hauptverzeichnis
+        # Standard: error-Ordner im Programmverzeichnis
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         default_error_path = os.path.join(base_dir, 'error')
         os.makedirs(default_error_path, exist_ok=True)

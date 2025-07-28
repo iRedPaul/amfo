@@ -872,16 +872,7 @@ class HotfolderDialog:
         """Speichert die Eingaben"""
         if not self._validate():
             return
-        
-        # Prüfe Lizenz wenn es ein neuer Hotfolder ist
-        if not self.hotfolder:  # Neuer Hotfolder
-            license_manager = get_license_manager()
-            if not license_manager.is_licensed():
-                messagebox.showerror("Keine gültige Lizenz", 
-                    "Sie können ohne gültige Lizenz keine neuen Hotfolder erstellen.\n\n"
-                    "Bitte installieren Sie eine gültige Lizenz über die Einstellungen.")
-                return
-        
+
         # Sammle ausgewählte Aktionen
         selected_actions = [action.value for action, var in self.action_vars.items() 
                            if var.get()]

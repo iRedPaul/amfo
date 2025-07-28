@@ -133,31 +133,44 @@ class HotfolderManager:
                 time.sleep(1)
     
     def _rescan_loop(self):
-        """Periodischer Rescan aller Hotfolder"""
+        """Periodischer Rescan aller Hotfolder und Lizenzprüfung."""
         while self._running:
             try:
                 current_time = time.time()
-                
-                # Warte bis zum nächsten Rescan
+
                 if current_time - self._last_rescan >= self._rescan_interval:
-                    logger.info(f"Führe periodischen Rescan durch (alle {self._rescan_interval} Sekunden)...")
-                    
-                    # Rescan für alle aktivierten Hotfolder
-                    for hotfolder in self.config_manager.get_enabled_hotfolders():
-                        if hotfolder.id in self.file_watcher.handlers:
-                            logger.debug(f"Rescanne Hotfolder: {hotfolder.name}")
-                            self.file_watcher.rescan_hotfolder(hotfolder)
-                    
+                    logger.info(f"Führe periodischen Scan und Lizenzprüfung durch (alle {self._rescan_interval} Sekunden)...")
+
+                    # Periodische Lizenzprüfung
+                    license_manager = get_license_manager()
+                    if not license_manager.is_licensed():
+                        logger.warning("Lizenz ist abgelaufen oder ungültig. Deaktiviere alle Hotfolder.")
+                        # Stoppe die Überwachung für alle laufenden Hotfolder
+                        for hotfolder_id in list(self.file_watcher.observers.keys()):
+                            self.file_watcher.stop_watching(hotfolder_id)
+
+                        # Setze alle Hotfolder im Speicher auf 'disabled' (wird nicht gespeichert, um die GUI nicht zu überschreiben)
+                        for hotfolder in self.config_manager.hotfolders:
+                            hotfolder.enabled = False
+
+                        logger.info("Alle Hotfolder-Überwachungen wurden aufgrund der ungültigen Lizenz gestoppt.")
+                    else:
+                        # Rescan nur durchführen, wenn die Lizenz gültig ist
+                        for hotfolder in self.config_manager.get_enabled_hotfolders():
+                            if hotfolder.id in self.file_watcher.handlers:
+                                logger.debug(f"Rescanne Hotfolder: {hotfolder.name}")
+                                self.file_watcher.rescan_hotfolder(hotfolder)
+
                     self._last_rescan = current_time
-                    logger.debug("Periodischer Rescan abgeschlossen")
-                
-                # Schlafe für 10 Sekunden (prüfe alle 10 Sekunden ob Rescan nötig)
+                    logger.debug("Periodischer Scan abgeschlossen.")
+
+                # Prüfe alle 10 Sekunden, ob der nächste Scan fällig ist
                 time.sleep(10)
-                
+
             except Exception as e:
                 logger.error(f"Fehler im Rescan-Loop: {e}")
                 time.sleep(60)  # Bei Fehler länger warten
-    
+
     def _reload_configuration(self):
         """Lädt die Konfiguration neu und aktualisiert die Überwachungen"""
         try:

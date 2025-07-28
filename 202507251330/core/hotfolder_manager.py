@@ -221,19 +221,18 @@ class HotfolderManager:
         except Exception as e:
             logger.error(f"Fehler beim Config-Reload: {e}")
     
-    # Rest der Methoden bleibt unverändert...
     def create_hotfolder(self, name: str, input_path: str,
-                        description: str = "",
-                        process_pairs: bool = True,
-                        actions: Optional[List[str]] = None, 
-                        action_params: Optional[dict] = None, 
-                        xml_field_mappings: Optional[List[Dict]] = None,
-                        output_filename_expression: str = "<FileName>",
-                        ocr_zones: Optional[List[Dict]] = None,
-                        export_configs: Optional[List[Dict]] = None,
-                        stamp_configs: Optional[List[Dict]] = None,
-                        error_path: str = "",
-                        file_patterns: Optional[List[str]] = None) -> tuple[bool, str]:
+                            description: str = "",
+                            process_pairs: bool = True,
+                            actions: Optional[List[str]] = None,
+                            action_params: Optional[dict] = None,
+                            xml_field_mappings: Optional[List[Dict]] = None,
+                            output_filename_expression: str = "<FileName>",
+                            ocr_zones: Optional[List[Dict]] = None,
+                            export_configs: Optional[List[Dict]] = None,
+                            stamp_configs: Optional[List[Dict]] = None,
+                            error_path: str = "",
+                            file_patterns: Optional[List[str]] = None) -> tuple[bool, str]:
         """Erstellt einen neuen Hotfolder"""
         try:
             # Prüfe auf doppelten Input-Ordner nur bei AKTIVIERTEN Hotfoldern (normalisiert, case-insensitive)
@@ -244,13 +243,17 @@ class HotfolderManager:
                     existing_input_norm = os.path.normcase(os.path.abspath(hf.input_path))
                     if new_input_norm == existing_input_norm:
                         return False, f"Es existiert bereits ein aktivierter Hotfolder mit dem gleichen Input-Ordner: {hf.input_path}"
-            
+
+            # Lizenzprüfung direkt hier durchführen
+            is_licensed = get_license_manager().is_licensed()
+            is_enabled = is_licensed  # Hotfolder ist nur aktiv, wenn eine Lizenz vorhanden ist
+
             # Generiere eindeutige ID
             hotfolder_id = str(uuid.uuid4())
-            
+
             # Erstelle Konfiguration
             from models.hotfolder_config import ProcessingAction, OCRZone
-            
+
             # Konvertiere Action-Strings zu Enums
             if actions is None:
                 action_enums = []
@@ -261,7 +264,7 @@ class HotfolderManager:
                         action_enums.append(ProcessingAction(action))
                     except ValueError:
                         return False, f"Unbekannte Aktion: {action}"
-            
+
             # Konvertiere OCR-Zonen und stelle sicher, dass sie OCR_ Präfix haben
             ocr_zone_objects = []
             if ocr_zones:
@@ -270,14 +273,14 @@ class HotfolderManager:
                     zone_name = zone_dict['name']
                     if not zone_name.startswith('OCR_'):
                         zone_name = f'OCR_{zone_name}'
-                    
+
                     ocr_zone = OCRZone(
                         name=zone_name,
                         zone=tuple(zone_dict['zone']),
                         page_num=zone_dict['page_num']
                     )
                     ocr_zone_objects.append(ocr_zone)
-            
+
             if xml_field_mappings is None:
                 xml_field_mappings = []
             if export_configs is None:
@@ -288,10 +291,12 @@ class HotfolderManager:
                 ocr_zone_objects = []
             if file_patterns is None:
                 file_patterns = ['*.pdf']
+                
             hotfolder = HotfolderConfig(
                 id=hotfolder_id,
                 name=name,
                 input_path=input_path,
+                enabled=is_enabled,
                 description=description,
                 process_pairs=process_pairs,
                 actions=action_enums,
@@ -301,29 +306,34 @@ class HotfolderManager:
                 ocr_zones=ocr_zone_objects,
                 export_configs=export_configs,
                 stamp_configs=stamp_configs,
-                error_path=error_path,  # Wird ggf. in validate_paths gesetzt
+                error_path=error_path,
                 file_patterns=file_patterns
             )
-            
+
             # Validiere Pfade
             valid, message = self.config_manager.validate_paths(hotfolder)
             if not valid:
                 return False, message
-            
+
             # Speichere Konfiguration
             self.config_manager.add_hotfolder(hotfolder)
-            
-            # Starte Überwachung wenn aktiviert
+
+            # Starte Überwachung wenn aktiviert (wird nur passieren, wenn is_licensed true war)
             if hotfolder.enabled and self._running:
                 self.file_watcher.start_watching(hotfolder)
                 self.file_watcher.scan_existing_files(hotfolder)
-            
-            return True, hotfolder_id
-            
+
+            # --- NEU: Passe die Erfolgsmeldung an ---
+            success_message = f"Hotfolder '{name}' erfolgreich erstellt."
+            if not is_enabled:
+                success_message += " (Deaktiviert, da keine gültige Lizenz vorhanden ist)"
+                
+            return True, success_message
+
         except Exception as e:
             logger.exception("Fehler beim Erstellen des Hotfolders")
             return False, f"Fehler beim Erstellen des Hotfolders: {e}"
-    
+
     def update_hotfolder(self, hotfolder_id: str, **kwargs) -> tuple[bool, str]:
         """Aktualisiert einen bestehenden Hotfolder"""
         try:

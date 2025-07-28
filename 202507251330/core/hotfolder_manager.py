@@ -64,8 +64,8 @@ class HotfolderManager:
                 # Speichere Änderungen wenn welche deaktiviert wurden
                 if license_deactivated_any:
                     self.config_manager.save_config()
-            
-                # Starte Überwachung für alle aktivierten Hotfolder
+            else:
+                # Mit gültiger Lizenz: Starte Überwachung für alle aktivierten Hotfolder
                 for hotfolder in self.config_manager.get_enabled_hotfolders():
                     # Doppelte Prüfung - nur wirklich aktivierte Hotfolder starten
                     if hotfolder.enabled:
@@ -82,6 +82,17 @@ class HotfolderManager:
             self._rescan_thread.start()
             
             logger.info("Hotfolder-Manager gestartet")
+            
+            # Führe sofortigen Scan durch wenn Lizenz vorhanden ist
+            if license_manager.is_licensed():
+                # Kleine Verzögerung für Stabilität
+                time.sleep(0.5)
+                
+                # Triggere sofortigen Scan für alle aktivierten Hotfolder
+                for hotfolder in self.config_manager.get_enabled_hotfolders():
+                    if hotfolder.enabled:
+                        logger.info(f"Führe initialen Scan durch für: {hotfolder.name}")
+                        self.file_watcher.rescan_hotfolder(hotfolder)
             
             # Gib Flag zurück ob Hotfolder deaktiviert wurden
             return license_deactivated_any

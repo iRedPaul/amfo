@@ -56,8 +56,12 @@ class HotfolderHandler(FileSystemEventHandler):
         if file_path in self.pending_files:
             self.pending_files[file_path] = time.time()
     
-    def process_pending_files(self):
-        """Verarbeitet Dateien die bereit sind"""
+    def process_pending_files(self) -> int:
+        """Verarbeitet Dateien die bereit sind
+        
+        Returns:
+            int: Anzahl der verarbeiteten Dateien
+        """
         current_time = time.time()
         files_to_process = []
         
@@ -71,6 +75,8 @@ class HotfolderHandler(FileSystemEventHandler):
         # Verarbeite gefundene Dateien
         for file_path in files_to_process:
             self._process_file(file_path)
+        
+        return len(files_to_process)
     
     def _check_waiting_partner(self, new_file_path: str):
         """Prüft ob ein Partner auf diese Datei wartet und verarbeitet das Paar"""
@@ -292,11 +298,17 @@ class FileWatcher:
         self.processor.cleanup_temp_dir()
         logger.info("Alle Überwachungen gestoppt")
     
-    def process_pending_files(self):
-        """Verarbeitet ausstehende Dateien in allen Hotfoldern"""
+    def process_pending_files(self) -> int:
+        """Verarbeitet ausstehende Dateien in allen Hotfoldern
+        
+        Returns:
+            int: Gesamtanzahl der verarbeiteten Dateien
+        """
+        total_processed = 0
         try:
             for handler in self.handlers.values():
-                handler.process_pending_files()
+                processed_count = handler.process_pending_files()
+                total_processed += processed_count
             
             # Prüfe ob Cleanup notwendig ist
             current_time = time.time()
@@ -306,6 +318,8 @@ class FileWatcher:
                 logger.debug("Cleanup durchgeführt")
         except Exception as e:
             logger.exception("Fehler beim Verarbeiten ausstehender Dateien")
+        
+        return total_processed
     
     def scan_existing_files(self, hotfolder: HotfolderConfig):
         """Scannt und verarbeitet bereits vorhandene Dateien in einem Hotfolder"""

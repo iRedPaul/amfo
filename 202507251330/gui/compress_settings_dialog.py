@@ -1,19 +1,17 @@
 """
-Dialog für PDF-Komprimierungseinstellungen - Professionelle Version
+Dialog für PDF-Komprimierungseinstellungen - pypdf Version mit Reglern
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Dict, Optional, Any
 import sys
 import os
-import subprocess
 import threading
 import shutil
 import tempfile
 import logging
-import json
 from datetime import datetime
-import fitz  # PyMuPDF für PDF-Analyse
+from pypdf import PdfWriter
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,66 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class CompressSettingsDialog:
-    """Professioneller Dialog für PDF-Komprimierung"""
-    
-    # Vordefinierte Profile für Geschäftsdokumente
-    COMPRESSION_PROFILES = {
-        "Rechnung/Geschäftsdokument": {
-            "description": "Optimiert für Lesbarkeit von Text und Zahlen, erhält Stempel und Unterschriften",
-            "color_dpi": 300,
-            "gray_dpi": 300,
-            "mono_dpi": 600,
-            "jpeg_quality": 85,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True
-        },
-        "Langzeitarchiv": {
-            "description": "Ausgewogene Komprimierung für dauerhafte Archivierung",
-            "color_dpi": 200,
-            "gray_dpi": 200,
-            "mono_dpi": 400,
-            "jpeg_quality": 80,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True
-        },
-        "Gescanntes Dokument": {
-            "description": "Stärkere Komprimierung für bereits gescannte Dokumente",
-            "color_dpi": 150,
-            "gray_dpi": 150,
-            "mono_dpi": 300,
-            "jpeg_quality": 75,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True
-        },
-        "E-Mail-Versand": {
-            "description": "Maximale Komprimierung für kleine Dateigrößen",
-            "color_dpi": 100,
-            "gray_dpi": 100,
-            "mono_dpi": 200,
-            "jpeg_quality": 65,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True
-        },
-        "Benutzerdefiniert": {
-            "description": "Eigene Einstellungen verwenden",
-            "color_dpi": 150,
-            "gray_dpi": 150,
-            "mono_dpi": 300,
-            "jpeg_quality": 80,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True
-        }
-    }
+    """Dialog für PDF-Komprimierung mit pypdf und individuellen Reglern"""
     
     def __init__(self, parent, initial_params: Optional[Dict] = None):
         self.parent = parent
@@ -88,38 +27,31 @@ class CompressSettingsDialog:
         self.test_running = False
         self.compressed_pdf_path = None
         self.temp_dir = None
-        self.test_pdf_info = None
         
-        # Lade gespeicherte Einstellungen
-        self.saved_profiles = self._load_saved_profiles()
-        
-        # Standard-Parameter aus Profil
-        default_profile = "Rechnung/Geschäftsdokument"
-        self.default_params = self.COMPRESSION_PROFILES[default_profile].copy()
-        self.default_params['compression_profile'] = default_profile
+        # Standard-Parameter
+        self.params = {
+            'compression_level': 6,
+            'image_quality': 70
+        }
         
         # Übernehme initiale Parameter
-        self.params = self.default_params.copy()
         if initial_params:
             self.params.update(initial_params)
         
         # Dialog erstellen
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("PDF-Komprimierungseinstellungen")
-        self.dialog.geometry("700x680")
+        self.dialog.title("PDF-Komprimierung")
+        self.dialog.geometry("650x650")  # Etwas breiter für bessere Textanzeige
         self.dialog.resizable(False, False)
         
         # Dialog zentrieren
         self.dialog.update_idletasks()
-        x = (self.dialog.winfo_screenwidth() - 700) // 2
-        y = (self.dialog.winfo_screenheight() - 680) // 2
+        x = (self.dialog.winfo_screenwidth() - 650) // 2
+        y = (self.dialog.winfo_screenheight() - 650) // 2
         self.dialog.geometry(f"+{x}+{y}")
         
         self.dialog.transient(parent)
         self.dialog.grab_set()
-        
-        # Flags
-        self.changing_preset = False
         
         # GUI erstellen
         self._create_gui()
@@ -128,204 +60,167 @@ class CompressSettingsDialog:
         self.dialog.bind('<Return>', lambda e: self._on_ok())
         self.dialog.bind('<Escape>', lambda e: self._on_cancel())
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_cancel)
-        
-        # Prüfe Abhängigkeiten
-        self._check_dependencies()
     
     def _create_gui(self):
-        """Erstellt die GUI mit professionellem Layout"""
-        # Hauptframe mit Scrollbar
+        """Erstellt die GUI mit Reglern"""
+        # Hauptframe
         main_frame = ttk.Frame(self.dialog, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Profil-Auswahl
-        profile_frame = ttk.LabelFrame(main_frame, text="Komprimierungsprofil", padding="10")
-        profile_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        ttk.Label(profile_frame, text="Dokumenttyp:").pack(anchor=tk.W, pady=(0, 5))
-        
-        self.profile_var = tk.StringVar()
-        self.profile_combo = ttk.Combobox(
-            profile_frame,
-            textvariable=self.profile_var,
-            values=list(self.COMPRESSION_PROFILES.keys()),
-            state="readonly",
-            width=40
+        # Titel
+        title_label = ttk.Label(
+            main_frame, 
+            text="PDF-Komprimierungseinstellungen",
+            font=('TkDefaultFont', 12, 'bold')
         )
-        self.profile_combo.pack(fill=tk.X)
-        self.profile_combo.bind('<<ComboboxSelected>>', self._on_profile_changed)
+        title_label.pack(pady=(0, 10))
         
-        # Profilbeschreibung
-        self.profile_desc_label = ttk.Label(
-            profile_frame, 
-            text="",
-            wraplength=650,
-            font=('TkDefaultFont', 9, 'italic')
+        # Info-Label
+        info_label = ttk.Label(
+            main_frame,
+            text="Komprimiert Inhaltsströme und reduziert Bildqualität\nKeine externen Programme erforderlich!",
+            font=('TkDefaultFont', 9, 'italic'),
+            foreground='gray',
+            justify=tk.CENTER
         )
-        self.profile_desc_label.pack(anchor=tk.W, pady=(5, 0))
+        info_label.pack(pady=(0, 20))
         
-        # Detaillierte Einstellungen
-        settings_frame = ttk.LabelFrame(main_frame, text="Detaileinstellungen", padding="10")
-        settings_frame.pack(fill=tk.X, pady=(0, 15))
+        # Einstellungen Frame
+        settings_frame = ttk.LabelFrame(main_frame, text="Komprimierungseinstellungen", padding="15")
+        settings_frame.pack(fill=tk.X, pady=(0, 20))
         
-        # Notebook für Kategorien
-        self.notebook = ttk.Notebook(settings_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        # Komprimierungslevel Regler
+        compression_frame = ttk.Frame(settings_frame)
+        compression_frame.pack(fill=tk.X, pady=(0, 20))
         
-        # Tab 1: Bildeinstellungen
-        image_tab = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(image_tab, text="Bilder")
+        compression_label = ttk.Label(
+            compression_frame, 
+            text="Komprimierungsstärke (Inhaltsströme):",
+            font=('TkDefaultFont', 10)
+        )
+        compression_label.pack(anchor=tk.W, pady=(0, 5))
         
-        # Farbbilder
-        color_frame = ttk.Frame(image_tab)
-        color_frame.pack(fill=tk.X, pady=(0, 15))
+        compression_desc = ttk.Label(
+            compression_frame,
+            text="0 = Keine Komprimierung, 9 = Maximale Komprimierung",
+            font=('TkDefaultFont', 8, 'italic'),
+            foreground='gray'
+        )
+        compression_desc.pack(anchor=tk.W)
         
-        ttk.Label(color_frame, text="Farbbilder (DPI):").pack(anchor=tk.W)
+        # Regler Frame
+        compression_slider_frame = ttk.Frame(compression_frame)
+        compression_slider_frame.pack(fill=tk.X, pady=(5, 0))
         
-        color_control = ttk.Frame(color_frame)
-        color_control.pack(fill=tk.X)
-        
-        self.color_dpi_var = tk.IntVar(value=self.params.get('color_dpi', 300))
-        self.color_dpi_scale = ttk.Scale(
-            color_control,
-            from_=72, to=600,
-            variable=self.color_dpi_var,
+        self.compression_var = tk.IntVar(value=self.params['compression_level'])
+        self.compression_slider = ttk.Scale(
+            compression_slider_frame,
+            from_=0,
+            to=9,
+            variable=self.compression_var,
             orient=tk.HORIZONTAL,
-            length=400,
-            command=lambda v: self._on_value_changed()
+            command=self._update_compression_label
         )
-        self.color_dpi_scale.pack(side=tk.LEFT, padx=(0, 10))
+        self.compression_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
         
-        self.color_dpi_label = ttk.Label(color_control, text="300 DPI", width=10)
-        self.color_dpi_label.pack(side=tk.LEFT)
+        self.compression_value_label = ttk.Label(
+            compression_slider_frame,
+            text=f"Level: {self.compression_var.get()}",
+            width=10
+        )
+        self.compression_value_label.pack(side=tk.LEFT)
         
-        # Graustufenbilder
-        gray_frame = ttk.Frame(image_tab)
-        gray_frame.pack(fill=tk.X, pady=(0, 15))
+        # Bildqualität Regler
+        image_frame = ttk.Frame(settings_frame)
+        image_frame.pack(fill=tk.X)
         
-        ttk.Label(gray_frame, text="Graustufenbilder (DPI):").pack(anchor=tk.W)
+        image_label = ttk.Label(
+            image_frame,
+            text="Bildqualität (JPEG):",
+            font=('TkDefaultFont', 10)
+        )
+        image_label.pack(anchor=tk.W, pady=(0, 5))
         
-        gray_control = ttk.Frame(gray_frame)
-        gray_control.pack(fill=tk.X)
+        image_desc = ttk.Label(
+            image_frame,
+            text="10% = Niedrige Qualität/Kleine Größe, 100% = Beste Qualität/Große Größe",
+            font=('TkDefaultFont', 8, 'italic'),
+            foreground='gray'
+        )
+        image_desc.pack(anchor=tk.W)
         
-        self.gray_dpi_var = tk.IntVar(value=self.params.get('gray_dpi', 300))
-        self.gray_dpi_scale = ttk.Scale(
-            gray_control,
-            from_=72, to=600,
-            variable=self.gray_dpi_var,
+        # Regler Frame
+        image_slider_frame = ttk.Frame(image_frame)
+        image_slider_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.image_quality_var = tk.IntVar(value=self.params['image_quality'])
+        self.image_quality_slider = ttk.Scale(
+            image_slider_frame,
+            from_=10,
+            to=100,
+            variable=self.image_quality_var,
             orient=tk.HORIZONTAL,
-            length=400,
-            command=lambda v: self._on_value_changed()
+            command=self._update_image_label
         )
-        self.gray_dpi_scale.pack(side=tk.LEFT, padx=(0, 10))
+        self.image_quality_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
         
-        self.gray_dpi_label = ttk.Label(gray_control, text="300 DPI", width=10)
-        self.gray_dpi_label.pack(side=tk.LEFT)
-        
-        # Schwarz-Weiß-Bilder
-        mono_frame = ttk.Frame(image_tab)
-        mono_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        ttk.Label(mono_frame, text="Schwarz-Weiß-Bilder (DPI):").pack(anchor=tk.W)
-        
-        mono_control = ttk.Frame(mono_frame)
-        mono_control.pack(fill=tk.X)
-        
-        self.mono_dpi_var = tk.IntVar(value=self.params.get('mono_dpi', 600))
-        self.mono_dpi_scale = ttk.Scale(
-            mono_control,
-            from_=150, to=1200,
-            variable=self.mono_dpi_var,
-            orient=tk.HORIZONTAL,
-            length=400,
-            command=lambda v: self._on_value_changed()
+        self.image_quality_label = ttk.Label(
+            image_slider_frame,
+            text=f"{self.image_quality_var.get()}%",
+            width=10
         )
-        self.mono_dpi_scale.pack(side=tk.LEFT, padx=(0, 10))
+        self.image_quality_label.pack(side=tk.LEFT)
         
-        self.mono_dpi_label = ttk.Label(mono_control, text="600 DPI", width=10)
-        self.mono_dpi_label.pack(side=tk.LEFT)
+        # Vorschläge Frame
+        suggestions_frame = ttk.Frame(settings_frame)
+        suggestions_frame.pack(fill=tk.X, pady=(20, 0))
         
-        # JPEG-Qualität
-        quality_frame = ttk.Frame(image_tab)
-        quality_frame.pack(fill=tk.X)
-        
-        ttk.Label(quality_frame, text="JPEG-Qualität:").pack(anchor=tk.W)
-        
-        quality_control = ttk.Frame(quality_frame)
-        quality_control.pack(fill=tk.X)
-        
-        self.quality_var = tk.IntVar(value=self.params.get('jpeg_quality', 85))
-        self.quality_scale = ttk.Scale(
-            quality_control,
-            from_=10, to=100,
-            variable=self.quality_var,
-            orient=tk.HORIZONTAL,
-            length=400,
-            command=lambda v: self._on_value_changed()
+        suggestions_label = ttk.Label(
+            suggestions_frame,
+            text="Empfohlene Einstellungen:",
+            font=('TkDefaultFont', 9, 'bold')
         )
-        self.quality_scale.pack(side=tk.LEFT, padx=(0, 10))
+        suggestions_label.pack(anchor=tk.W, pady=(0, 5))
         
-        self.quality_label = ttk.Label(quality_control, text="85%", width=10)
-        self.quality_label.pack(side=tk.LEFT)
+        # Vorschlag-Buttons
+        button_frame = ttk.Frame(suggestions_frame)
+        button_frame.pack(fill=tk.X)
         
-        # Tab 2: Optimierungen
-        optimize_tab = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(optimize_tab, text="Optimierungen")
+        ttk.Button(
+            button_frame,
+            text="Hohe Qualität",
+            command=lambda: self._set_preset(3, 85)
+        ).pack(side=tk.LEFT, padx=(0, 5))
         
-        # Checkboxen
-        self.downsample_var = tk.BooleanVar(value=self.params.get('downsample_images', True))
-        self.downsample_check = ttk.Checkbutton(
-            optimize_tab,
-            text="Bilder intelligent herunterskalieren (nur wenn DPI höher als Zielwert)",
-            variable=self.downsample_var,
-            command=self._on_value_changed
-        )
-        self.downsample_check.pack(anchor=tk.W, pady=5)
+        ttk.Button(
+            button_frame,
+            text="Ausgewogen",
+            command=lambda: self._set_preset(6, 70)
+        ).pack(side=tk.LEFT, padx=(0, 5))
         
-        self.subset_fonts_var = tk.BooleanVar(value=self.params.get('subset_fonts', True))
-        self.subset_fonts_check = ttk.Checkbutton(
-            optimize_tab,
-            text="Schriften optimieren (nur verwendete Zeichen einbetten)",
-            variable=self.subset_fonts_var,
-            command=self._on_value_changed
-        )
-        self.subset_fonts_check.pack(anchor=tk.W, pady=5)
-        
-        self.remove_duplicates_var = tk.BooleanVar(value=self.params.get('remove_duplicates', True))
-        self.remove_duplicates_check = ttk.Checkbutton(
-            optimize_tab,
-            text="Duplizierte Bilder erkennen und entfernen",
-            variable=self.remove_duplicates_var,
-            command=self._on_value_changed
-        )
-        self.remove_duplicates_check.pack(anchor=tk.W, pady=5)
-        
-        self.optimize_var = tk.BooleanVar(value=self.params.get('optimize', True))
-        self.optimize_check = ttk.Checkbutton(
-            optimize_tab,
-            text="PDF-Struktur optimieren (Linearisierung)",
-            variable=self.optimize_var,
-            command=self._on_value_changed
-        )
-        self.optimize_check.pack(anchor=tk.W, pady=5)
+        ttk.Button(
+            button_frame,
+            text="Kleine Größe",
+            command=lambda: self._set_preset(9, 50)
+        ).pack(side=tk.LEFT)
         
         # Test-Bereich
-        test_frame = ttk.LabelFrame(main_frame, text="Qualitätstest", padding="10")
-        test_frame.pack(fill=tk.X, pady=(0, 15))
+        test_frame = ttk.LabelFrame(main_frame, text="Komprimierung testen", padding="15")
+        test_frame.pack(fill=tk.X, pady=(0, 20))
         
-        test_buttons = ttk.Frame(test_frame)
-        test_buttons.pack(fill=tk.X)
+        test_button_frame = ttk.Frame(test_frame)
+        test_button_frame.pack(fill=tk.X)
         
         self.test_button = ttk.Button(
-            test_buttons,
-            text="📄 PDF zum Testen auswählen...",
+            test_button_frame,
+            text="PDF zum Testen auswählen...",
             command=self._test_compression
         )
         self.test_button.pack(side=tk.LEFT, padx=(0, 10))
         
         self.preview_button = ttk.Button(
-            test_buttons,
-            text="👁️ Komprimierte PDF anzeigen",
+            test_button_frame,
+            text="Ergebnis anzeigen",
             command=self._show_preview,
             state=tk.DISABLED
         )
@@ -335,24 +230,11 @@ class CompressSettingsDialog:
         self.test_progress = ttk.Progressbar(
             test_frame,
             mode='indeterminate',
-            length=650
+            length=600  # Angepasst an breiteres Fenster
         )
         
-        # Test-Ergebnis
+        # Test-Ergebnis - als Frame für kompaktere Darstellung
         self.test_result_frame = ttk.Frame(test_frame)
-        self.test_result_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        # Profil speichern
-        save_frame = ttk.Frame(main_frame)
-        save_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        self.save_profile_button = ttk.Button(
-            save_frame,
-            text="💾 Profil speichern...",
-            command=self._save_profile,
-            state=tk.DISABLED
-        )
-        self.save_profile_button.pack(side=tk.LEFT)
         
         # Buttons
         button_frame = ttk.Frame(main_frame)
@@ -373,126 +255,39 @@ class CompressSettingsDialog:
         )
         self.ok_button.pack(side=tk.RIGHT)
         
-        # Initiale Werte setzen
-        self._set_initial_values()
-        self._update_all()
+        # Initiale Label-Updates
+        self._update_compression_label(None)
+        self._update_image_label(None)
     
-    def _check_dependencies(self):
-        """Prüft benötigte Abhängigkeiten"""
-        errors = []
-        
-        # Prüfe Ghostscript
-        if not self._is_ghostscript_available():
-            errors.append("Ghostscript nicht gefunden")
-            self.ok_button.config(state=tk.DISABLED)
-            self.test_button.config(state=tk.DISABLED)
-        
-        if errors:
-            messagebox.showwarning(
-                "Fehlende Abhängigkeiten",
-                "Folgende Programme werden benötigt:\n\n" + 
-                "\n".join(f"• {err}" for err in errors) +
-                "\n\nBitte installieren Sie die fehlenden Programme:\n" +
-                "Ghostscript: https://www.ghostscript.com/download/gsdnld.html"
-            )
+    def _update_compression_label(self, value):
+        """Aktualisiert das Komprimierungslevel-Label"""
+        level = int(self.compression_var.get())
+        self.compression_value_label.config(text=f"Level: {level}")
     
-    def _is_ghostscript_available(self):
-        """Prüft ob Ghostscript verfügbar ist"""
-        if os.name == 'nt':
-            for cmd in ['gswin64c', 'gswin32c']:
-                try:
-                    result = subprocess.run([cmd, '--version'], capture_output=True)
-                    if result.returncode == 0:
-                        return True
-                except:
-                    continue
+    def _update_image_label(self, value):
+        """Aktualisiert das Bildqualität-Label"""
+        quality = int(self.image_quality_var.get())
+        self.image_quality_label.config(text=f"{quality}%")
+        
+        # Farbcodierung
+        if quality >= 80:
+            color = "green"
+        elif quality >= 60:
+            color = "orange"
         else:
-            try:
-                result = subprocess.run(['gs', '--version'], capture_output=True)
-                return result.returncode == 0
-            except:
-                pass
-        return False
+            color = "red"
+        
+        self.image_quality_label.config(foreground=color)
     
-    def _set_initial_values(self):
-        """Setzt initiale Werte"""
-        # Bestimme Profil
-        profile = self.params.get('compression_profile', 'Rechnung/Geschäftsdokument')
-        
-        if profile in self.COMPRESSION_PROFILES:
-            self.profile_var.set(profile)
-        else:
-            # Versuche Profil anhand der Werte zu erkennen
-            for name, settings in self.COMPRESSION_PROFILES.items():
-                if (settings['color_dpi'] == self.params.get('color_dpi', 0) and
-                    settings['jpeg_quality'] == self.params.get('jpeg_quality', 0)):
-                    self.profile_var.set(name)
-                    break
-            else:
-                self.profile_var.set('Benutzerdefiniert')
-    
-    def _on_profile_changed(self, event=None):
-        """Wird bei Profiländerung aufgerufen"""
-        if self.changing_preset:
-            return
-        
-        profile_name = self.profile_var.get()
-        if profile_name in self.COMPRESSION_PROFILES:
-            self.changing_preset = True
-            
-            profile = self.COMPRESSION_PROFILES[profile_name]
-            
-            # Setze Werte
-            self.color_dpi_var.set(profile['color_dpi'])
-            self.gray_dpi_var.set(profile['gray_dpi'])
-            self.mono_dpi_var.set(profile['mono_dpi'])
-            self.quality_var.set(profile['jpeg_quality'])
-            self.downsample_var.set(profile['downsample_images'])
-            self.subset_fonts_var.set(profile['subset_fonts'])
-            self.remove_duplicates_var.set(profile['remove_duplicates'])
-            self.optimize_var.set(profile['optimize'])
-            
-            # Beschreibung aktualisieren
-            self.profile_desc_label.config(text=profile['description'])
-            
-            self.changing_preset = False
-            self._update_all()
-            
-            # Save-Button aktivieren bei Benutzerdefiniert
-            self.save_profile_button.config(
-                state=tk.NORMAL if profile_name == 'Benutzerdefiniert' else tk.DISABLED
-            )
-    
-    def _on_value_changed(self):
-        """Bei Wertänderung"""
-        if not self.changing_preset:
-            self.profile_var.set('Benutzerdefiniert')
-            self.profile_desc_label.config(text=self.COMPRESSION_PROFILES['Benutzerdefiniert']['description'])
-            self.save_profile_button.config(state=tk.NORMAL)
-        self._update_all()
-    
-    def _update_all(self):
-        """Aktualisiert alle Anzeigen"""
-        # DPI-Labels
-        self.color_dpi_label.config(text=f"{int(self.color_dpi_var.get())} DPI")
-        self.gray_dpi_label.config(text=f"{int(self.gray_dpi_var.get())} DPI")
-        self.mono_dpi_label.config(text=f"{int(self.mono_dpi_var.get())} DPI")
-        
-        # Qualität mit Farbcodierung
-        quality = int(self.quality_var.get())
-        self.quality_label.config(text=f"{quality}%")
-        
-        if quality >= 85:
-            color = "#2d862d"  # Dunkelgrün
-        elif quality >= 70:
-            color = "#ff8c00"  # Orange
-        else:
-            color = "#dc143c"  # Rot
-        
-        self.quality_label.config(foreground=color)
+    def _set_preset(self, compression_level, image_quality):
+        """Setzt vordefinierte Werte"""
+        self.compression_var.set(compression_level)
+        self.image_quality_var.set(image_quality)
+        self._update_compression_label(None)
+        self._update_image_label(None)
     
     def _test_compression(self):
-        """Testet Komprimierung mit Qualitätsanalyse"""
+        """Testet Komprimierung"""
         if self.test_running:
             return
         
@@ -513,7 +308,10 @@ class CompressSettingsDialog:
         for widget in self.test_result_frame.winfo_children():
             widget.destroy()
         
-        self.test_progress.pack(fill=tk.X, pady=(5, 0))
+        self.preview_button.config(state=tk.DISABLED)
+        
+        # Progress anzeigen
+        self.test_progress.pack(fill=tk.X, pady=(10, 0))
         self.test_progress.start()
         
         # Test in Thread
@@ -521,7 +319,7 @@ class CompressSettingsDialog:
         thread.start()
     
     def _run_test(self, filename):
-        """Führt Komprimierungstest aus"""
+        """Führt Komprimierungstest aus mit pypdf"""
         try:
             # Aufräumen
             if self.temp_dir and os.path.exists(self.temp_dir):
@@ -535,243 +333,207 @@ class CompressSettingsDialog:
             # Kopiere Original
             shutil.copy2(filename, temp_input)
             
-            # Analysiere Original
-            original_info = self._analyze_pdf(temp_input)
+            # Original-Größe
+            original_size = os.path.getsize(temp_input)
             
-            # Ghostscript-Befehl
-            gs_cmd = self._get_gs_command()
-            if not gs_cmd:
-                raise Exception("Ghostscript nicht gefunden")
+            # Aktuelle Einstellungen
+            compression_level = int(self.compression_var.get())
+            image_quality = int(self.image_quality_var.get())
             
-            # Baue Befehl
-            cmd = self._build_gs_command(gs_cmd, temp_input, temp_output, original_info)
-            
-            # Komprimierung
+            # Komprimierung mit pypdf
             start_time = datetime.now()
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            compression_time = (datetime.now() - start_time).total_seconds()
             
-            if result.returncode == 0 and os.path.exists(temp_output):
-                # Analysiere komprimierte PDF
-                compressed_info = self._analyze_pdf(temp_output)
+            try:
+                # Öffne PDF mit pypdf
+                writer = PdfWriter(clone_from=temp_input)
                 
-                # Speichere für Vorschau
+                # Zähle Bilder
+                total_images = 0
+                compressed_images = 0
+                
+                # Komprimiere alle Seiten
+                page_count = len(writer.pages)
+                for i, page in enumerate(writer.pages):
+                    # Komprimiere Inhaltsströme nur wenn Level > 0
+                    if compression_level > 0:
+                        page.compress_content_streams(level=compression_level)
+                    
+                    # Komprimiere Bilder
+                    for img in page.images:
+                        total_images += 1
+                        try:
+                            img.replace(img.image, quality=image_quality)
+                            compressed_images += 1
+                        except Exception as img_error:
+                            logger.debug(f"Bild übersprungen: {img_error}")
+                    
+                    # Konsolidiere Objekte
+                    page.scale_by(1.0)
+                
+                # Weitere Optimierungen
+                try:
+                    writer.compress_identical_objects()
+                    writer.remove_duplication()
+                except:
+                    pass  # Ignoriere Fehler bei Optimierungen
+                
+                # Schreibe komprimierte PDF
+                with open(temp_output, 'wb') as output_file:
+                    writer.write(output_file)
+                
+                compression_time = (datetime.now() - start_time).total_seconds()
+                
+                # Erfolg
+                compressed_size = os.path.getsize(temp_output)
+                reduction_percent = (1 - compressed_size/original_size) * 100
+                
                 self.compressed_pdf_path = temp_output
                 
-                # Erstelle Ergebnis
-                test_result = {
+                # Ergebnis kompakt darstellen
+                result_data = {
                     'success': True,
-                    'original': original_info,
-                    'compressed': compressed_info,
-                    'time': compression_time
+                    'original_size': original_size,
+                    'compressed_size': compressed_size,
+                    'reduction_percent': reduction_percent,
+                    'compression_time': compression_time,
+                    'page_count': page_count,
+                    'total_images': total_images,
+                    'compressed_images': compressed_images,
+                    'compression_level': compression_level,
+                    'image_quality': image_quality
                 }
                 
-                self.dialog.after(0, self._test_complete, test_result)
-            else:
-                error = result.stderr if result.stderr else "Unbekannter Fehler"
-                self.dialog.after(0, self._test_complete, {'success': False, 'error': error})
+                self.dialog.after(0, self._test_complete, result_data)
+                
+            except Exception as e:
+                self.dialog.after(0, self._test_complete, {'success': False, 'error': str(e)})
             
         except Exception as e:
             self.dialog.after(0, self._test_complete, {'success': False, 'error': str(e)})
     
-    def _analyze_pdf(self, pdf_path):
-        """Analysiert PDF für Qualitätskontrolle"""
-        try:
-            doc = fitz.open(pdf_path)
-            
-            info = {
-                'size': os.path.getsize(pdf_path),
-                'pages': doc.page_count,
-                'images': 0,
-                'avg_dpi': 0,
-                'has_text': False
-            }
-            
-            total_dpi = 0
-            dpi_count = 0
-            
-            # Analysiere erste Seiten
-            for page_num in range(min(3, doc.page_count)):
-                page = doc[page_num]
-                
-                # Text prüfen
-                if page.get_text().strip():
-                    info['has_text'] = True
-                
-                # Bilder analysieren
-                image_list = page.get_images()
-                info['images'] += len(image_list)
-                
-                for img in image_list:
-                    xref = img[0]
-                    pix = fitz.Pixmap(doc, xref)
-                    if pix.width > 0 and pix.height > 0:
-                        bbox = page.get_image_bbox(img)
-                        if bbox:
-                            width_inch = (bbox.x1 - bbox.x0) / 72
-                            height_inch = (bbox.y1 - bbox.y0) / 72
-                            if width_inch > 0 and height_inch > 0:
-                                dpi = (pix.width / width_inch + pix.height / height_inch) / 2
-                                total_dpi += dpi
-                                dpi_count += 1
-                    pix = None
-            
-            if dpi_count > 0:
-                info['avg_dpi'] = int(total_dpi / dpi_count)
-            
-            doc.close()
-            return info
-            
-        except Exception as e:
-            logger.error(f"PDF-Analyse fehlgeschlagen: {e}")
-            return {
-                'size': os.path.getsize(pdf_path),
-                'pages': 0,
-                'images': 0,
-                'avg_dpi': 0,
-                'has_text': False
-            }
-    
-    def _build_gs_command(self, gs_cmd, input_path, output_path, pdf_info):
-        """Baut intelligenten Ghostscript-Befehl"""
-        cmd = [
-            gs_cmd,
-            '-sDEVICE=pdfwrite',
-            '-dCompatibilityLevel=1.7',
-            '-dNOPAUSE',
-            '-dBATCH',
-            '-dQUIET',
-            '-dSAFER',
-            f'-sOutputFile={output_path}'
-        ]
-        
-        # DPI-Einstellungen
-        cmd.extend([
-            f'-dColorImageResolution={self.color_dpi_var.get()}',
-            f'-dGrayImageResolution={self.gray_dpi_var.get()}',
-            f'-dMonoImageResolution={self.mono_dpi_var.get()}'
-        ])
-        
-        # Intelligentes Downsampling
-        if self.downsample_var.get():
-            # Nur wenn Original-DPI höher
-            if pdf_info.get('avg_dpi', 0) > self.color_dpi_var.get():
-                cmd.extend([
-                    '-dDownsampleColorImages=true',
-                    '-dDownsampleGrayImages=true',
-                    '-dDownsampleMonoImages=true',
-                    '-dColorImageDownsampleType=/Bicubic',
-                    '-dGrayImageDownsampleType=/Bicubic',
-                    '-dMonoImageDownsampleType=/Bicubic',
-                    '-dColorImageDownsampleThreshold=1.0',
-                    '-dGrayImageDownsampleThreshold=1.0',
-                    '-dMonoImageDownsampleThreshold=1.0'
-                ])
-            else:
-                cmd.extend([
-                    '-dDownsampleColorImages=false',
-                    '-dDownsampleGrayImages=false',
-                    '-dDownsampleMonoImages=false'
-                ])
-        
-        # Komprimierung
-        quality = self.quality_var.get() / 100.0
-        cmd.extend([
-            '-dAutoFilterColorImages=true',
-            '-dAutoFilterGrayImages=true',
-            f'-dJPEGQ={quality:.2f}',
-            '-dColorImageFilter=/DCTEncode',
-            '-dGrayImageFilter=/DCTEncode',
-            '-dMonoImageFilter=/CCITTFaxEncode'
-        ])
-        
-        # Weitere Optimierungen
-        if self.subset_fonts_var.get():
-            cmd.extend(['-dSubsetFonts=true', '-dEmbedAllFonts=true'])
-        
-        if self.remove_duplicates_var.get():
-            cmd.append('-dDetectDuplicateImages=true')
-        
-        if self.optimize_var.get():
-            cmd.extend(['-dOptimize=true', '-dCompressPages=true'])
-        
-        cmd.append(input_path)
-        
-        return cmd
-    
-    def _test_complete(self, result):
-        """Zeigt Testergebnis an"""
+    def _test_complete(self, result_data):
+        """Zeigt Testergebnis kompakt an"""
         self.test_running = False
         self.test_button.config(state=tk.NORMAL)
         self.test_progress.stop()
         self.test_progress.pack_forget()
         
-        # Leere Frame
+        # Leere vorherige Ergebnisse
         for widget in self.test_result_frame.winfo_children():
             widget.destroy()
         
-        if result['success']:
-            # Erfolgreiche Komprimierung
-            orig = result['original']
-            comp = result['compressed']
+        if result_data['success']:
+            # Erfolg
+            self.test_result_frame.pack(fill=tk.X, pady=(10, 0))
             
-            # Berechne Statistiken
-            size_reduction = (1 - comp['size']/orig['size']) * 100
-            size_mb_orig = orig['size'] / (1024*1024)
-            size_mb_comp = comp['size'] / (1024*1024)
+            # Größenberechnung
+            orig_size = result_data['original_size']
+            comp_size = result_data['compressed_size']
+            reduction = result_data['reduction_percent']
             
-            # Erstelle Ergebnis-UI
-            stats_frame = ttk.Frame(self.test_result_frame)
-            stats_frame.pack(fill=tk.X)
+            size_kb_orig = orig_size / 1024
+            size_mb_orig = orig_size / (1024*1024)
+            size_kb_comp = comp_size / 1024
+            size_mb_comp = comp_size / (1024*1024)
             
-            # Größenvergleich
-            size_text = f"Dateigröße: {size_mb_orig:.2f} MB → {size_mb_comp:.2f} MB ({size_reduction:.1f}% kleiner)"
-            size_label = ttk.Label(stats_frame, text=size_text)
-            size_label.pack(anchor=tk.W)
-            
-            # Farbcodierung basierend auf Reduktion
-            if size_reduction > 50:
-                color = "#2d862d"  # Grün
-            elif size_reduction > 20:
-                color = "#ff8c00"  # Orange
+            # Formatierung
+            if size_mb_orig >= 1:
+                orig_text = f"{size_mb_orig:.2f} MB"
             else:
-                color = "#dc143c"  # Rot
+                orig_text = f"{size_kb_orig:.0f} KB"
             
-            size_label.config(foreground=color)
+            if size_mb_comp >= 1:
+                comp_text = f"{size_mb_comp:.2f} MB"
+            else:
+                comp_text = f"{size_kb_comp:.0f} KB"
             
-            # Weitere Statistiken
-            if orig['avg_dpi'] > 0:
-                dpi_text = f"Durchschnittliche Bild-DPI: {orig['avg_dpi']} → {comp['avg_dpi']}"
-                ttk.Label(stats_frame, text=dpi_text).pack(anchor=tk.W)
+            # Farbe basierend auf Reduzierung
+            if reduction > 30:
+                color = "green"
+                status_icon = "✓"
+            elif reduction > 10:
+                color = "orange"
+                status_icon = "✓"
+            elif reduction > 0:
+                color = "dark orange"
+                status_icon = "✓"
+            else:
+                color = "blue"
+                status_icon = "ℹ️"
             
-            time_text = f"Komprimierungszeit: {result['time']:.1f} Sekunden"
-            ttk.Label(stats_frame, text=time_text).pack(anchor=tk.W)
-            
-            # Qualitätswarnung wenn nötig
-            if size_reduction > 70:
-                warning_frame = ttk.Frame(self.test_result_frame)
-                warning_frame.pack(fill=tk.X, pady=(10, 0))
+            # Kompakte Darstellung in 2-3 Zeilen
+            if reduction > 0:
+                # Zeile 1: Status und Größenänderung
+                line1_frame = ttk.Frame(self.test_result_frame)
+                line1_frame.pack(fill=tk.X)
                 
-                warning_label = ttk.Label(
-                    warning_frame,
-                    text="⚠️ Hohe Komprimierung - bitte Qualität prüfen!",
-                    foreground="#ff8c00"
+                status_label = ttk.Label(
+                    line1_frame,
+                    text=f"{status_icon} Komprimierung erfolgreich: {orig_text} → {comp_text} ({reduction:.1f}% kleiner)",
+                    font=('TkDefaultFont', 10, 'bold'),
+                    foreground=color
                 )
-                warning_label.pack(anchor=tk.W)
+                status_label.pack(side=tk.LEFT)
+                
+                # Zeile 2: Details
+                line2_frame = ttk.Frame(self.test_result_frame)
+                line2_frame.pack(fill=tk.X, pady=(5, 0))
+                
+                details_text = f"Zeit: {result_data['compression_time']:.1f}s | Seiten: {result_data['page_count']}"
+                if result_data['total_images'] > 0:
+                    details_text += f" | Bilder: {result_data['compressed_images']}/{result_data['total_images']}"
+                details_text += f" | Einstellungen: L{result_data['compression_level']}/Q{result_data['image_quality']}%"
+                
+                details_label = ttk.Label(
+                    line2_frame,
+                    text=details_text,
+                    font=('TkDefaultFont', 9),
+                    foreground='gray'
+                )
+                details_label.pack(side=tk.LEFT)
+            else:
+                # PDF bereits optimiert
+                line1_frame = ttk.Frame(self.test_result_frame)
+                line1_frame.pack(fill=tk.X)
+                
+                status_label = ttk.Label(
+                    line1_frame,
+                    text=f"{status_icon} PDF ist bereits optimiert: {orig_text} (keine weitere Reduzierung möglich)",
+                    font=('TkDefaultFont', 10),
+                    foreground=color
+                )
+                status_label.pack(side=tk.LEFT)
+                
+                # Details
+                line2_frame = ttk.Frame(self.test_result_frame)
+                line2_frame.pack(fill=tk.X, pady=(5, 0))
+                
+                details_text = f"Zeit: {result_data['compression_time']:.1f}s | Seiten: {result_data['page_count']}"
+                if result_data['total_images'] > 0:
+                    details_text += f" | Bilder gefunden: {result_data['total_images']}"
+                
+                details_label = ttk.Label(
+                    line2_frame,
+                    text=details_text,
+                    font=('TkDefaultFont', 9),
+                    foreground='gray'
+                )
+                details_label.pack(side=tk.LEFT)
             
             # Preview-Button aktivieren
             self.preview_button.config(state=tk.NORMAL)
-            self.test_pdf_info = result
-            
         else:
             # Fehler
+            self.test_result_frame.pack(fill=tk.X, pady=(10, 0))
+            
             error_label = ttk.Label(
                 self.test_result_frame,
-                text=f"❌ Fehler: {result['error']}",
-                foreground="#dc143c"
+                text=f"❌ Fehler bei Komprimierung: {result_data['error']}",
+                font=('TkDefaultFont', 10),
+                foreground='red',
+                wraplength=600
             )
-            error_label.pack(anchor=tk.W)
-            self.preview_button.config(state=tk.DISABLED)
+            error_label.pack(side=tk.LEFT)
     
     def _show_preview(self):
         """Öffnet komprimierte PDF"""
@@ -780,72 +542,11 @@ class CompressSettingsDialog:
                 if os.name == 'nt':
                     os.startfile(self.compressed_pdf_path)
                 elif os.name == 'posix':
+                    import subprocess
                     subprocess.run(['open' if sys.platform == 'darwin' else 'xdg-open', 
                                   self.compressed_pdf_path])
             except Exception as e:
                 messagebox.showerror("Fehler", f"Konnte PDF nicht öffnen: {str(e)}")
-    
-    def _save_profile(self):
-        """Speichert benutzerdefiniertes Profil"""
-        name = tk.simpledialog.askstring(
-            "Profil speichern",
-            "Name für das Profil:",
-            parent=self.dialog
-        )
-        
-        if name:
-            profile = {
-                'color_dpi': self.color_dpi_var.get(),
-                'gray_dpi': self.gray_dpi_var.get(),
-                'mono_dpi': self.mono_dpi_var.get(),
-                'jpeg_quality': self.quality_var.get(),
-                'downsample_images': self.downsample_var.get(),
-                'subset_fonts': self.subset_fonts_var.get(),
-                'remove_duplicates': self.remove_duplicates_var.get(),
-                'optimize': self.optimize_var.get()
-            }
-            
-            self.saved_profiles[name] = profile
-            self._save_profiles_to_file()
-            
-            messagebox.showinfo("Profil gespeichert", f"Profil '{name}' wurde gespeichert.")
-    
-    def _load_saved_profiles(self):
-        """Lädt gespeicherte Profile"""
-        try:
-            profile_file = os.path.join(os.path.dirname(__file__), '..', 'compression_profiles.json')
-            if os.path.exists(profile_file):
-                with open(profile_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except:
-            pass
-        return {}
-    
-    def _save_profiles_to_file(self):
-        """Speichert Profile in Datei"""
-        try:
-            profile_file = os.path.join(os.path.dirname(__file__), '..', 'compression_profiles.json')
-            with open(profile_file, 'w', encoding='utf-8') as f:
-                json.dump(self.saved_profiles, f, indent=2)
-        except Exception as e:
-            logger.error(f"Fehler beim Speichern der Profile: {e}")
-    
-    def _get_gs_command(self):
-        """Ermittelt Ghostscript-Befehl"""
-        if os.name == 'nt':
-            for cmd in ['gswin64c', 'gswin32c']:
-                try:
-                    subprocess.run([cmd, '--version'], capture_output=True, check=True)
-                    return cmd
-                except:
-                    continue
-        else:
-            try:
-                subprocess.run(['gs', '--version'], capture_output=True, check=True)
-                return 'gs'
-            except:
-                pass
-        return None
     
     def _cleanup(self):
         """Räumt temporäre Dateien auf"""
@@ -858,18 +559,8 @@ class CompressSettingsDialog:
     def _on_ok(self):
         """Speichert Einstellungen"""
         self.result = {
-            'compression_profile': self.profile_var.get(),
-            'color_dpi': self.color_dpi_var.get(),
-            'gray_dpi': self.gray_dpi_var.get(),
-            'mono_dpi': self.mono_dpi_var.get(),
-            'jpeg_quality': self.quality_var.get(),
-            'color_compression': 'jpeg',
-            'gray_compression': 'jpeg',
-            'mono_compression': 'ccitt',
-            'downsample_images': self.downsample_var.get(),
-            'subset_fonts': self.subset_fonts_var.get(),
-            'remove_duplicates': self.remove_duplicates_var.get(),
-            'optimize': self.optimize_var.get()
+            'compression_level': int(self.compression_var.get()),
+            'image_quality': int(self.image_quality_var.get())
         }
         
         self._cleanup()

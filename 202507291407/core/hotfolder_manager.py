@@ -277,93 +277,114 @@ class HotfolderManager:
         logger.info("Rescan-Thread beendet")
 
     def _reload_configuration(self):
-        """Lädt die Konfiguration neu und aktualisiert die Überwachungen"""
-        try:
-            with self._lock:
-                logger.info("Starte Config-Reload (ausgelöst durch GUI)...")
-                
-                # Performance-Messung
-                start_time = time.time()
-                
-                # Merke aktuelle Hotfolder-IDs
-                old_hotfolder_ids = {hf.id for hf in self.config_manager.hotfolders}
-                
-                # Lade neue Konfiguration
-                self.config_manager.load_config()
-                
-                # Neue Hotfolder-IDs
-                new_hotfolder_ids = {hf.id for hf in self.config_manager.hotfolders}
-                
-                # Finde Änderungen
-                removed_ids = old_hotfolder_ids - new_hotfolder_ids
-                added_ids = new_hotfolder_ids - old_hotfolder_ids
-                existing_ids = old_hotfolder_ids & new_hotfolder_ids
-                
-                # Prüfe Lizenz für neue Konfiguration
-                license_manager = get_license_manager()
-                if not license_manager.is_licensed():
-                    logger.warning("Keine gültige Lizenz - deaktiviere alle Hotfolder")
-                    deactivated_count = 0
-                    for hotfolder in self.config_manager.hotfolders:
-                        if hotfolder.enabled:
-                            hotfolder.enabled = False
-                            deactivated_count += 1
-                            logger.info(f"Hotfolder '{hotfolder.name}' wurde wegen fehlender Lizenz deaktiviert")
+            """Lädt die Konfiguration neu und aktualisiert die Überwachungen"""
+            try:
+                with self._lock:
+                    logger.info("Starte Config-Reload (ausgelöst durch GUI)...")
                     
-                    if deactivated_count > 0:
-                        self.config_manager.save_config()
-                        logger.info(f"{deactivated_count} Hotfolder deaktiviert und gespeichert")
-                
-                # Entferne gelöschte Hotfolder
-                for hotfolder_id in removed_ids:
-                    try:
-                        logger.info(f"Entferne Überwachung für gelöschten Hotfolder: {hotfolder_id}")
-                        self.file_watcher.stop_watching(hotfolder_id)
-                    except Exception as e:
-                        logger.error(f"Fehler beim Entfernen der Überwachung {hotfolder_id}: {e}")
-                
-                # Aktualisiere bestehende Hotfolder
-                updated_count = 0
-                for hotfolder_id in existing_ids:
-                    hotfolder = self.config_manager.get_hotfolder(hotfolder_id)
-                    if hotfolder:
-                        try:
-                            # Stoppe alte Überwachung
-                            self.file_watcher.stop_watching(hotfolder_id)
-                            
-                            # Starte neue Überwachung wenn aktiviert
+                    # Performance-Messung
+                    start_time = time.time()
+                    
+                    # Merke aktuelle Hotfolder-IDs
+                    old_hotfolder_ids = {hf.id for hf in self.config_manager.hotfolders}
+                    
+                    # Lade neue Konfiguration
+                    self.config_manager.load_config()
+                    
+                    # Neue Hotfolder-IDs
+                    new_hotfolder_ids = {hf.id for hf in self.config_manager.hotfolders}
+                    
+                    # Finde Änderungen
+                    removed_ids = old_hotfolder_ids - new_hotfolder_ids
+                    added_ids = new_hotfolder_ids - old_hotfolder_ids
+                    existing_ids = old_hotfolder_ids & new_hotfolder_ids
+                    
+                    # Prüfe Lizenz für neue Konfiguration
+                    license_manager = get_license_manager()
+                    if not license_manager.is_licensed():
+                        logger.warning("Keine gültige Lizenz - deaktiviere alle Hotfolder")
+                        
+                        # WICHTIG: Stoppe zuerst alle laufenden Überwachungen
+                        stopped_count = 0
+                        for hotfolder_id in list(self.file_watcher.observers.keys()):
+                            try:
+                                self.file_watcher.stop_watching(hotfolder_id)
+                                stopped_count += 1
+                                logger.info(f"Überwachung gestoppt für Hotfolder: {hotfolder_id}")
+                            except Exception as e:
+                                logger.error(f"Fehler beim Stoppen der Überwachung {hotfolder_id}: {e}")
+                        
+                        # Dann deaktiviere alle Hotfolder in der Konfiguration
+                        deactivated_count = 0
+                        for hotfolder in self.config_manager.hotfolders:
                             if hotfolder.enabled:
-                                logger.info(f"Aktualisiere Überwachung für: {hotfolder.name}")
+                                hotfolder.enabled = False
+                                deactivated_count += 1
+                                logger.info(f"Hotfolder '{hotfolder.name}' wurde wegen fehlender Lizenz deaktiviert")
+                        
+                        if deactivated_count > 0:
+                            self.config_manager.save_config()
+                            logger.info(f"{stopped_count} Überwachungen sofort gestoppt, "
+                                      f"{deactivated_count} Hotfolder deaktiviert und gespeichert")
+                        elif stopped_count > 0:
+                            logger.info(f"{stopped_count} Überwachungen wurden sofort gestoppt")
+                        
+                        # Früher Ausstieg - keine weiteren Aktionen nötig
+                        elapsed_time = time.time() - start_time
+                        logger.info(f"Config-Reload abgeschlossen in {elapsed_time:.2f}s - "
+                                  f"Alle Hotfolder wegen fehlender Lizenz deaktiviert")
+                        return
+                    
+                    # Entferne gelöschte Hotfolder
+                    for hotfolder_id in removed_ids:
+                        try:
+                            logger.info(f"Entferne Überwachung für gelöschten Hotfolder: {hotfolder_id}")
+                            self.file_watcher.stop_watching(hotfolder_id)
+                        except Exception as e:
+                            logger.error(f"Fehler beim Entfernen der Überwachung {hotfolder_id}: {e}")
+                    
+                    # Aktualisiere bestehende Hotfolder
+                    updated_count = 0
+                    for hotfolder_id in existing_ids:
+                        hotfolder = self.config_manager.get_hotfolder(hotfolder_id)
+                        if hotfolder:
+                            try:
+                                # Stoppe alte Überwachung
+                                self.file_watcher.stop_watching(hotfolder_id)
+                                
+                                # Starte neue Überwachung wenn aktiviert
+                                if hotfolder.enabled:
+                                    logger.info(f"Aktualisiere Überwachung für: {hotfolder.name}")
+                                    self.file_watcher.start_watching(hotfolder)
+                                    self.file_watcher.scan_existing_files(hotfolder)
+                                    updated_count += 1
+                                else:
+                                    logger.info(f"Hotfolder deaktiviert: {hotfolder.name}")
+                            except Exception as e:
+                                logger.error(f"Fehler beim Aktualisieren von {hotfolder.name}: {e}")
+                    
+                    # Füge neue Hotfolder hinzu
+                    added_count = 0
+                    for hotfolder_id in added_ids:
+                        hotfolder = self.config_manager.get_hotfolder(hotfolder_id)
+                        if hotfolder and hotfolder.enabled:
+                            try:
+                                logger.info(f"Starte Überwachung für neuen Hotfolder: {hotfolder.name}")
                                 self.file_watcher.start_watching(hotfolder)
                                 self.file_watcher.scan_existing_files(hotfolder)
-                                updated_count += 1
-                            else:
-                                logger.info(f"Hotfolder deaktiviert: {hotfolder.name}")
-                        except Exception as e:
-                            logger.error(f"Fehler beim Aktualisieren von {hotfolder.name}: {e}")
-                
-                # Füge neue Hotfolder hinzu
-                added_count = 0
-                for hotfolder_id in added_ids:
-                    hotfolder = self.config_manager.get_hotfolder(hotfolder_id)
-                    if hotfolder and hotfolder.enabled:
-                        try:
-                            logger.info(f"Starte Überwachung für neuen Hotfolder: {hotfolder.name}")
-                            self.file_watcher.start_watching(hotfolder)
-                            self.file_watcher.scan_existing_files(hotfolder)
-                            added_count += 1
-                        except Exception as e:
-                            logger.error(f"Fehler beim Hinzufügen von {hotfolder.name}: {e}")
-                
-                # Performance-Log
-                elapsed_time = time.time() - start_time
-                logger.info(f"Config-Reload abgeschlossen in {elapsed_time:.2f}s - "
-                          f"Entfernt: {len(removed_ids)}, Hinzugefügt: {added_count}, "
-                          f"Aktualisiert: {updated_count}")
-                
-        except Exception as e:
-            logger.error(f"Fehler beim Config-Reload: {e}", exc_info=True)
-    
+                                added_count += 1
+                            except Exception as e:
+                                logger.error(f"Fehler beim Hinzufügen von {hotfolder.name}: {e}")
+                    
+                    # Performance-Log
+                    elapsed_time = time.time() - start_time
+                    logger.info(f"Config-Reload abgeschlossen in {elapsed_time:.2f}s - "
+                              f"Entfernt: {len(removed_ids)}, Hinzugefügt: {added_count}, "
+                              f"Aktualisiert: {updated_count}")
+                    
+            except Exception as e:
+                logger.error(f"Fehler beim Config-Reload: {e}", exc_info=True)
+
     def create_hotfolder(self, name: str, input_path: str,
                             description: str = "",
                             process_pairs: bool = True,

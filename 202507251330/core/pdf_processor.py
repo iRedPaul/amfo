@@ -6,6 +6,7 @@ import shutil
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 import PyPDF2
+from pypdf import PdfWriter, PdfReader
 from PIL import Image
 import sys
 import xml.etree.ElementTree as ET
@@ -32,62 +33,6 @@ logger = logging.getLogger(__name__)
 
 class PDFProcessor:
     """Vereinfachter PDF-Prozessor mit nur 3 Export-Formaten"""
-    
-    # Komprimierungsprofile für verschiedene Dokumenttypen
-    COMPRESSION_PROFILES = {
-        "rechnung": {
-            "name": "Rechnung/Geschäftsdokument",
-            "color_dpi": 300,
-            "gray_dpi": 300,
-            "mono_dpi": 600,
-            "jpeg_quality": 85,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True,
-            "preserve_quality": True,
-            "description": "Optimiert für Lesbarkeit von Text und Zahlen, erhält Stempel und Unterschriften"
-        },
-        "archiv": {
-            "name": "Langzeitarchiv",
-            "color_dpi": 200,
-            "gray_dpi": 200,
-            "mono_dpi": 400,
-            "jpeg_quality": 80,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True,
-            "preserve_quality": True,
-            "description": "Ausgewogene Komprimierung für Langzeitarchivierung"
-        },
-        "scan": {
-            "name": "Gescanntes Dokument",
-            "color_dpi": 150,
-            "gray_dpi": 150,
-            "mono_dpi": 300,
-            "jpeg_quality": 75,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True,
-            "preserve_quality": False,
-            "description": "Stärkere Komprimierung für bereits gescannte Dokumente"
-        },
-        "email": {
-            "name": "E-Mail-Versand",
-            "color_dpi": 100,
-            "gray_dpi": 100,
-            "mono_dpi": 200,
-            "jpeg_quality": 65,
-            "downsample_images": True,
-            "subset_fonts": True,
-            "remove_duplicates": True,
-            "optimize": True,
-            "preserve_quality": False,
-            "description": "Maximale Komprimierung für E-Mail-Versand"
-        }
-    }
     
     def __init__(self):
         self.xml_processor = XMLFieldProcessor()
@@ -147,10 +92,7 @@ class PDFProcessor:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         dependencies_dir = os.path.join(base_dir, 'dependencies')
         
-        # Prüfe Ghostscript (nur für Komprimierung)
-        if not self._is_ghostscript_available():
-            warnings.append("Ghostscript nicht gefunden - PDF-Komprimierung nicht möglich")
-            warnings.append(f"Bitte Ghostscript im dependencies Ordner platzieren: {dependencies_dir}")
+        logger.info("PDF-Komprimierung verwendet pypdf - keine externen Abhängigkeiten erforderlich")
         
         # Prüfe Tesseract (für PDF/A-Export)
         if not self._is_tesseract_available():
@@ -168,111 +110,24 @@ class PDFProcessor:
     
     def _is_tesseract_available(self) -> bool:
         """Prüft ob Tesseract verfügbar ist"""
-        # Basis-Verzeichnis für dependencies
+        # Vereinfachte Prüfung - nur die wichtigsten Pfade
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        dependencies_dir = os.path.join(base_dir, 'dependencies')
-        
-        # Prüfe dependencies Ordner
-        tesseract_path = os.path.join(dependencies_dir, 'Tesseract-OCR', 'tesseract.exe')
-        if os.path.exists(tesseract_path):
-            self._tesseract_path = tesseract_path
-            # Setze Umgebungsvariable für OCRmyPDF
-            os.environ['TESSERACT_PATH'] = os.path.dirname(tesseract_path)
-            logger.debug(f"Tesseract gefunden: {tesseract_path}")
-            return True
-        
-        # Prüfe Installation im Programmverzeichnis
-        program_paths = [
-            os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'belegpilot', 'dependencies', 'Tesseract-OCR', 'tesseract.exe'),
-            os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'belegpilot', 'dependencies', 'Tesseract-OCR', 'tesseract.exe')
+        tesseract_paths = [
+            os.path.join(base_dir, 'dependencies', 'Tesseract-OCR', 'tesseract.exe'),
+            'tesseract'  # System PATH
         ]
         
-        for path in program_paths:
-            if os.path.exists(path):
-                self._tesseract_path = path
-                os.environ['TESSERACT_PATH'] = os.path.dirname(path)
-                logger.debug(f"Tesseract gefunden in Installationsverzeichnis: {path}")
-                return True
-        
-        # Fallback auf System-PATH
-        try:
-            result = subprocess.run(["tesseract", "--version"], 
-                                  capture_output=True, check=True)
-            if result.returncode == 0:
-                self._tesseract_path = "tesseract"
-                return True
-        except:
-            pass
+        for path in tesseract_paths:
+            try:
+                if os.path.exists(path) or subprocess.run([path, '--version'], capture_output=True).returncode == 0:
+                    self._tesseract_path = path
+                    if os.path.exists(path):
+                        os.environ['TESSERACT_PATH'] = os.path.dirname(path)
+                    return True
+            except:
+                continue
         
         return False
-    
-    def _is_ghostscript_available(self) -> bool:
-        """Prüft ob Ghostscript verfügbar ist"""
-        # Basis-Verzeichnis für dependencies
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        dependencies_dir = os.path.join(base_dir, 'dependencies')
-        
-        # Prüfe dependencies Ordner mit Glob für verschiedene Versionen
-        import glob
-        gs_patterns = [
-            os.path.join(dependencies_dir, 'gs', 'gs*', 'bin', 'gswin64c.exe'),
-            os.path.join(dependencies_dir, 'gs', 'gs*', 'bin', 'gswin32c.exe'),
-        ]
-        
-        for pattern in gs_patterns:
-            for gs_path in glob.glob(pattern):
-                if os.path.exists(gs_path):
-                    self._ghostscript_path = gs_path
-                    logger.debug(f"Ghostscript gefunden: {gs_path}")
-                    return True
-        
-        # Prüfe Installation im Programmverzeichnis
-        program_patterns = [
-            os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'belegpilot', 'dependencies', 'gs', 'gs*', 'bin', 'gswin64c.exe'),
-            os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'belegpilot', 'dependencies', 'gs', 'gs*', 'bin', 'gswin32c.exe')
-        ]
-        
-        for pattern in program_patterns:
-            for gs_path in glob.glob(pattern):
-                if os.path.exists(gs_path):
-                    self._ghostscript_path = gs_path
-                    logger.debug(f"Ghostscript gefunden in Installationsverzeichnis: {gs_path}")
-                    return True
-        
-        # Standard-Prüfung
-        try:
-            if os.name == 'nt':
-                # Windows
-                for cmd in ['gswin64c', 'gswin32c']:
-                    try:
-                        result = subprocess.run([cmd, '--version'], 
-                                              capture_output=True, text=True)
-                        if result.returncode == 0:
-                            self._ghostscript_path = cmd
-                            return True
-                    except:
-                        continue
-                return False
-            else:
-                # Unix/Linux
-                result = subprocess.run(['gs', '--version'], 
-                                      capture_output=True, text=True)
-                if result.returncode == 0:
-                    self._ghostscript_path = 'gs'
-                    return True
-        except:
-            pass
-        
-        return False
-    
-    def _get_ghostscript_cmd(self) -> str:
-        """Gibt den Ghostscript-Befehl zurück"""
-        if hasattr(self, '_ghostscript_path'):
-            return self._ghostscript_path
-        elif os.name == 'nt':
-            return 'gswin64c'
-        else:
-            return 'gs'
     
     def process_document(self, doc_pair: DocumentPair, hotfolder: HotfolderConfig) -> bool:
         """
@@ -458,67 +313,32 @@ class PDFProcessor:
             return False
     
     def _analyze_pdf(self, pdf_path: str) -> Dict[str, Any]:
-        """Analysiert PDF für optimale Verarbeitung"""
+        """Vereinfachte PDF-Analyse"""
         try:
             doc = fitz.open(pdf_path)
             
             info = {
                 "pages": doc.page_count,
-                "has_text": False,
-                "has_images": False,
-                "has_forms": False,
-                "is_scanned": True,
-                "avg_dpi": 0,
                 "file_size_mb": os.path.getsize(pdf_path) / (1024 * 1024),
-                "needs_ocr": False
+                "has_images": False,
+                "has_text": False,
+                "image_count": 0
             }
             
-            total_dpi = 0
-            image_count = 0
-            text_chars = 0
-            
-            for page_num in range(min(5, doc.page_count)):  # Analysiere erste 5 Seiten
-                page = doc[page_num]
+            # Prüfe erste 3 Seiten für Performance
+            for i in range(min(3, doc.page_count)):
+                page = doc[i]
                 
                 # Text prüfen
                 text = page.get_text()
-                text_chars += len(text.strip())
+                if len(text.strip()) > 50:
+                    info["has_text"] = True
                 
-                # Bilder analysieren
+                # Bilder prüfen
                 image_list = page.get_images()
-                if image_list:
+                info["image_count"] += len(image_list)
+                if len(image_list) > 0:
                     info["has_images"] = True
-                    for img in image_list:
-                        try:
-                            xref = img[0]
-                            pix = fitz.Pixmap(doc, xref)
-                            if pix.width > 0 and pix.height > 0:
-                                # Schätze DPI basierend auf Bildgröße
-                                bbox = page.get_image_bbox(img)
-                                if bbox:
-                                    width_inch = (bbox.x1 - bbox.x0) / 72
-                                    height_inch = (bbox.y1 - bbox.y0) / 72
-                                    if width_inch > 0 and height_inch > 0:
-                                        dpi_x = pix.width / width_inch
-                                        dpi_y = pix.height / height_inch
-                                        total_dpi += (dpi_x + dpi_y) / 2
-                                        image_count += 1
-                            pix = None
-                        except Exception as img_error:
-                            logger.debug(f"Fehler bei Bildanalyse: {img_error}")
-                            continue
-                
-                # Formulare prüfen
-                if page.widgets():
-                    info["has_forms"] = True
-            
-            # Auswertung
-            info["has_text"] = text_chars > 100
-            info["is_scanned"] = info["has_images"] and not info["has_text"]
-            info["needs_ocr"] = info["is_scanned"]
-            
-            if image_count > 0:
-                info["avg_dpi"] = int(total_dpi / image_count)
             
             doc.close()
             return info
@@ -527,40 +347,30 @@ class PDFProcessor:
             logger.error(f"PDF-Analyse fehlgeschlagen: {e}")
             return {
                 "pages": 0,
-                "has_text": False,
-                "has_images": False,
-                "has_forms": False,
-                "is_scanned": False,
-                "avg_dpi": 0,
                 "file_size_mb": 0,
-                "needs_ocr": False
+                "has_images": False,
+                "has_text": False,
+                "image_count": 0
             }
     
     def _compress_pdf(self, pdf_path: str, params: Dict[str, Any]) -> bool:
-        """Intelligente PDF-Komprimierung basierend auf Dokumenttyp"""
+        """PDF-Komprimierung mit pypdf"""
         try:
-            if not self._is_ghostscript_available():
-                raise Exception("Ghostscript nicht verfügbar - bitte im dependencies Ordner platzieren")
-            
             original_size = os.path.getsize(pdf_path)
-            pdf_info = params.get('pdf_info', {})
             
-            # Bestimme optimales Komprimierungsprofil
-            profile = self._determine_compression_profile(params, pdf_info)
-            logger.info(f"Verwende Komprimierungsprofil: {profile['name']}")
+            # Hole direkte Parameter
+            compression_level = params.get('compression_level', 6)
+            image_quality = params.get('image_quality', 70)
             
-            # Führe Komprimierung durch
-            success = self._compress_with_ghostscript_advanced(pdf_path, profile, pdf_info)
+            logger.info(f"Verwende Komprimierung: Level {compression_level}, Bildqualität {image_quality}%")
+            
+            # Komprimierung durchführen
+            success = self._compress_with_pypdf(pdf_path, compression_level, image_quality, params.get('pdf_info', {}))
             
             if success:
                 compressed_size = os.path.getsize(pdf_path)
                 reduction_percent = (1 - compressed_size/original_size) * 100
                 logger.info(f"Komprimierung erfolgreich: {reduction_percent:.1f}% Reduktion")
-                
-                # Warne wenn Qualitätsverlust zu hoch
-                if reduction_percent > 70 and profile.get('preserve_quality', True):
-                    logger.warning("Hohe Komprimierung - Qualität prüfen!")
-                
                 return True
             
             return False
@@ -569,162 +379,82 @@ class PDFProcessor:
             logger.error(f"Komprimierung fehlgeschlagen: {e}")
             return False
     
-    def _determine_compression_profile(self, params: Dict[str, Any], pdf_info: Dict[str, Any]) -> Dict[str, Any]:
-        """Bestimmt das optimale Komprimierungsprofil"""
-        # Prüfe ob explizites Profil gewählt wurde
-        profile_name = params.get('compression_profile', 'auto')
-        
-        if profile_name != 'auto' and profile_name in self.COMPRESSION_PROFILES:
-            profile = self.COMPRESSION_PROFILES[profile_name].copy()
-        else:
-            # Automatische Profil-Auswahl basierend auf PDF-Eigenschaften
-            if pdf_info.get('is_scanned', False):
-                profile = self.COMPRESSION_PROFILES['scan'].copy()
-            elif pdf_info.get('file_size_mb', 0) > 10:
-                profile = self.COMPRESSION_PROFILES['email'].copy()
-            elif pdf_info.get('has_forms', False):
-                profile = self.COMPRESSION_PROFILES['rechnung'].copy()
-            else:
-                profile = self.COMPRESSION_PROFILES['archiv'].copy()
-        
-        # Überschreibe mit benutzerdefinierten Parametern
-        for key in ['color_dpi', 'gray_dpi', 'mono_dpi', 'jpeg_quality']:
-            if key in params:
-                profile[key] = params[key]
-        
-        return profile
-    
-    def _compress_with_ghostscript_advanced(self, pdf_path: str, profile: Dict[str, Any], pdf_info: Dict[str, Any]) -> bool:
-        """Erweiterte Ghostscript-Komprimierung mit Qualitätskontrolle"""
+    def _compress_with_pypdf(self, pdf_path: str, compression_level: int, image_quality: int, pdf_info: Dict[str, Any]) -> bool:
+        """Komprimierung mit pypdf inklusive Bildkomprimierung"""
         try:
-            gs_cmd = self._get_ghostscript_cmd()
-            
-            # Prüfe nochmal ob Ghostscript funktioniert
-            try:
-                result = subprocess.run([gs_cmd, '--version'], capture_output=True, check=True)
-                if result.returncode != 0:
-                    raise Exception("Ghostscript nicht ausführbar")
-            except:
-                raise Exception("Ghostscript konnte nicht gestartet werden")
-            
             temp_output = pdf_path + '.compressed'
             
-            # Basis-Befehl
-            cmd = [
-                gs_cmd,
-                '-sDEVICE=pdfwrite',
-                '-dCompatibilityLevel=1.7',  # Neuere PDF-Version für bessere Komprimierung
-                '-dNOPAUSE',
-                '-dBATCH',
-                '-dQUIET',
-                '-dSAFER',  # Sicherheitsmodus
-                f'-sOutputFile={temp_output}'
-            ]
+            # Öffne PDF mit pypdf
+            writer = PdfWriter(clone_from=pdf_path)
             
-            # Auflösungseinstellungen
-            cmd.extend([
-                f"-dColorImageResolution={profile['color_dpi']}",
-                f"-dGrayImageResolution={profile['gray_dpi']}",
-                f"-dMonoImageResolution={profile['mono_dpi']}"
-            ])
+            # Komprimiere alle Seiten
+            compress_images = pdf_info.get('has_images', False)
             
-            # Downsampling-Einstellungen
-            if profile.get('downsample_images', True):
-                # Intelligentes Downsampling nur wenn Bild-DPI höher als Ziel-DPI
-                if pdf_info.get('avg_dpi', 0) > profile['color_dpi']:
-                    cmd.extend([
-                        '-dDownsampleColorImages=true',
-                        '-dDownsampleGrayImages=true',
-                        '-dDownsampleMonoImages=true',
-                        '-dColorImageDownsampleType=/Bicubic',
-                        '-dGrayImageDownsampleType=/Bicubic',
-                        '-dMonoImageDownsampleType=/Bicubic',
-                        f"-dColorImageDownsampleThreshold=1.0",
-                        f"-dGrayImageDownsampleThreshold=1.0",
-                        f"-dMonoImageDownsampleThreshold=1.0"
-                    ])
-                else:
-                    cmd.extend([
-                        '-dDownsampleColorImages=false',
-                        '-dDownsampleGrayImages=false',
-                        '-dDownsampleMonoImages=false'
-                    ])
+            logger.info(f"Komprimiere mit Level {compression_level}, Bildqualität: {image_quality}")
             
-            # Komprimierungseinstellungen
-            if profile.get('preserve_quality', True):
-                # Qualitätserhaltende Komprimierung
-                cmd.extend([
-                    '-dAutoFilterColorImages=true',
-                    '-dAutoFilterGrayImages=true',
-                    f"-dJPEGQ={profile['jpeg_quality']/100.0:.2f}",
-                    '-dColorImageFilter=/DCTEncode',
-                    '-dGrayImageFilter=/DCTEncode',
-                    '-dMonoImageFilter=/CCITTFaxEncode',
-                    '-dEncodeColorImages=true',
-                    '-dEncodeGrayImages=true',
-                    '-dEncodeMonoImages=true'
-                ])
-            else:
-                # Aggressive Komprimierung
-                cmd.extend([
-                    '-dAutoFilterColorImages=false',
-                    '-dAutoFilterGrayImages=false',
-                    f"-dJPEGQ={profile['jpeg_quality']/100.0:.2f}",
-                    '-dColorImageFilter=/DCTEncode',
-                    '-dGrayImageFilter=/DCTEncode',
-                    '-dMonoImageFilter=/CCITTFaxEncode'
-                ])
+            for i, page in enumerate(writer.pages):
+                try:
+                    # Komprimiere Inhaltsströme nur wenn Level > 0
+                    if compression_level > 0:
+                        page.compress_content_streams(level=compression_level)
+                    
+                    # Komprimiere Bilder wenn vorhanden
+                    if compress_images:
+                        for img in page.images:
+                            try:
+                                # Ersetze Bild mit reduzierter Qualität
+                                img.replace(img.image, quality=image_quality)
+                            except Exception as img_error:
+                                logger.debug(f"Bildkomprimierung übersprungen für Bild auf Seite {i+1}: {img_error}")
+                    
+                    # Konsolidiere Objekte
+                    page.scale_by(1.0)  # Trick um Objekte zu konsolidieren
+                    
+                except Exception as e:
+                    logger.warning(f"Warnung bei Seite {i+1}: {e}")
             
-            # Font-Optimierungen
-            if profile.get('subset_fonts', True):
-                cmd.extend([
-                    '-dSubsetFonts=true',
-                    '-dEmbedAllFonts=true',
-                    '-dCompressFonts=true'
-                ])
+            # Zusätzliche Optimierungen
+            try:
+                writer.compress_identical_objects()  # Ohne Parameter
+                writer.remove_duplication()
+            except Exception as e:
+                logger.debug(f"Optimierung übersprungen: {e}")
             
-            # Weitere Optimierungen
-            if profile.get('optimize', True):
-                cmd.extend([
-                    '-dOptimize=true',
-                    '-dCompressPages=true',
-                    '-dUseFlateCompression=true'
-                ])
-            
-            if profile.get('remove_duplicates', True):
-                cmd.append('-dDetectDuplicateImages=true')
-            
-            # PDF/A-Kompatibilität beibehalten wenn vorhanden
-            if pdf_info.get('is_pdfa', False):
-                cmd.append('-dPDFA=2')
-                cmd.append('-dPDFACompatibilityPolicy=1')
-            
-            # Input-Datei
-            cmd.append(pdf_path)
-            
-            # Ausführen
-            logger.debug(f"Ghostscript-Befehl: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode != 0:
-                logger.error(f"Ghostscript-Fehler: {result.stderr}")
-                return False
+            # Schreibe komprimierte PDF
+            with open(temp_output, 'wb') as output_file:
+                writer.write(output_file)
             
             # Prüfe Ergebnis
             if os.path.exists(temp_output) and os.path.getsize(temp_output) > 0:
+                # Prüfe ob komprimierte Datei kleiner ist
+                original_size = os.path.getsize(pdf_path)
+                compressed_size = os.path.getsize(temp_output)
+                
+                if compressed_size >= original_size:
+                    logger.warning(f"Komprimierte Datei ist nicht kleiner ({compressed_size} >= {original_size})")
+                    # Bei pypdf trotzdem verwenden, da optimiert
+                
                 # Validiere komprimierte PDF
                 if self._validate_pdf(temp_output):
                     shutil.move(temp_output, pdf_path)
                     return True
                 else:
                     logger.error("Komprimierte PDF ist ungültig")
-                    os.remove(temp_output)
+                    if os.path.exists(temp_output):
+                        os.remove(temp_output)
                     return False
             
             return False
             
         except Exception as e:
-            logger.error(f"Ghostscript-Komprimierung fehlgeschlagen: {e}")
+            logger.error(f"pypdf-Komprimierung fehlgeschlagen: {e}")
+            # Aufräumen bei Fehler
+            temp_output = pdf_path + '.compressed'
+            if os.path.exists(temp_output):
+                try:
+                    os.remove(temp_output)
+                except:
+                    pass
             return False
     
     def _build_context(self, pdf_path: str, xml_path: Optional[str], 

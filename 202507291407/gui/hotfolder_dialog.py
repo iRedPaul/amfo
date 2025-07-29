@@ -272,21 +272,19 @@ class HotfolderDialog:
         # Export-Liste (TreeView)
         self.export_tree_frame = ttk.Frame(self.export_list_frame)
         self.export_tree = ttk.Treeview(self.export_tree_frame, 
-                                       columns=("Aktiv", "Name", "Methode", "Format", "Pfad"),
+                                       columns=("Name", "Methode", "Format", "Pfad"),
                                        show="headings", height=10)
         
         # Spalten konfigurieren
-        self.export_tree.heading("Aktiv", text="Aktiv")
         self.export_tree.heading("Name", text="Name")
         self.export_tree.heading("Methode", text="Methode")
         self.export_tree.heading("Format", text="Format")
         self.export_tree.heading("Pfad", text="Pfad/Ziel")
         
-        self.export_tree.column("Aktiv", width=50, anchor=tk.CENTER)
-        self.export_tree.column("Name", width=180)
-        self.export_tree.column("Methode", width=80)
-        self.export_tree.column("Format", width=150)
-        self.export_tree.column("Pfad", width=300)
+        self.export_tree.column("Name", width=200)
+        self.export_tree.column("Methode", width=100)
+        self.export_tree.column("Format", width=170)
+        self.export_tree.column("Pfad", width=350)
         
         # Scrollbar für Export-Liste
         self.export_vsb = ttk.Scrollbar(self.export_tree_frame, orient="vertical", 
@@ -444,29 +442,27 @@ class HotfolderDialog:
             self.no_export_info.pack(pady=(10, 0))
     
     def _add_export_to_tree(self, export: ExportConfig):
-        """Fügt einen Export zur TreeView hinzu"""
-        aktiv = "✓" if export.enabled else "✗"
-        
-        methode = {
-            ExportMethod.FILE: "Datei",
-            ExportMethod.EMAIL: "E-Mail",
-            ExportMethod.FTP: "FTP"
-        }.get(export.export_method, export.export_method.value)
-        
-        # Nur noch 3 Formate
-        format_name = {
-            ExportFormat.PDF: "PDF (Original)",
-            ExportFormat.SEARCHABLE_PDF_A: "PDF/A (Durchsuchbar)",
-            ExportFormat.XML: "XML"
-        }.get(export.export_format, export.export_format.value)
-        
-        # Ziel je nach Methode
-        if export.export_method == ExportMethod.EMAIL and export.email_config:
-            ziel = export.email_config.recipient
-        else:
-            ziel = export.export_path_expression[:50] + "..." if len(export.export_path_expression) > 50 else export.export_path_expression
-        
-        self.export_tree.insert("", "end", values=(aktiv, export.name, methode, format_name, ziel))
+            """Fügt einen Export zur TreeView hinzu - OHNE Aktiv-Spalte"""
+            methode = {
+                ExportMethod.FILE: "Datei",
+                ExportMethod.EMAIL: "E-Mail",
+                ExportMethod.FTP: "FTP"
+            }.get(export.export_method, export.export_method.value)
+            
+            # Nur noch 3 Formate
+            format_name = {
+                ExportFormat.PDF: "PDF (Original)",
+                ExportFormat.SEARCHABLE_PDF_A: "PDF/A (Durchsuchbar)",
+                ExportFormat.XML: "XML"
+            }.get(export.export_format, export.export_format.value)
+            
+            # Ziel je nach Methode
+            if export.export_method == ExportMethod.EMAIL and export.email_config:
+                ziel = export.email_config.recipient
+            else:
+                ziel = export.export_path_expression[:50] + "..." if len(export.export_path_expression) > 50 else export.export_path_expression
+            
+            self.export_tree.insert("", "end", values=(export.name, methode, format_name, ziel))
     
     def _on_export_selection_changed(self, event):
         """Wird aufgerufen wenn die Export-Auswahl sich ändert"""

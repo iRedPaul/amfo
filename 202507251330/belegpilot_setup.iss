@@ -29,6 +29,8 @@ ShowLanguageDialog=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 CloseApplicationsFilter=*.exe
+; Wichtig: Force kill bei Deinstallation
+UninstallRestartComputer=no
 
 [Languages]
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
@@ -75,10 +77,46 @@ Filename: "{app}\{#MyServiceExeName}"; Parameters: "--startup manual install"; F
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} starten"; Flags: nowait postinstall skipifsilent runascurrentuser
 
 [UninstallRun]
-; Stoppt den Dienst vor der Deinstallation
-Filename: "{app}\{#MyServiceExeName}"; Parameters: "stop"; Flags: runhidden waituntilterminated
-; Entfernt den Dienst aus dem System
-Filename: "{app}\{#MyServiceExeName}"; Parameters: "remove"; Flags: runhidden waituntilterminated
+; WICHTIG: Zuerst GUI beenden (falls läuft)
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden waituntilterminated; RunOnceId: "KillGUI"
+
+; Dienst stoppen
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopService"
+
+; Warte kurz
+Filename: "{sys}\timeout.exe"; Parameters: "/T 2"; Flags: runhidden waituntilterminated; RunOnceId: "Wait1"
+
+; Dienst entfernen
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "remove"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveService"
+
+; Force kill falls Service noch läuft
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#MyServiceExeName}"; Flags: runhidden waituntilterminated; RunOnceId: "KillService"
+
+; Warte nochmal
+Filename: "{sys}\timeout.exe"; Parameters: "/T 2"; Flags: runhidden waituntilterminated; RunOnceId: "Wait2"
+
+[Dirs]
+; Explizit zu löschende Verzeichnisse
+Name: "{app}\_internal"; Flags: uninsalwaysuninstall
+Name: "{app}\dependencies"; Flags: uninsalwaysuninstall
+Name: "{app}\logs"; Flags: uninsalwaysuninstall
+Name: "{app}"; Flags: uninsalwaysuninstall
+
+[InstallDelete]
+; Lösche alte Dateien vor Installation
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\logs"
+
+[UninstallDelete]
+; Explizite Löschanweisungen bei Deinstallation
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\dependencies"
+Type: filesandordirs; Name: "{app}\logs"
+Type: files; Name: "{app}\{#MyServiceExeName}"
+Type: files; Name: "{app}\{#MyAppExeName}"
+Type: files; Name: "{app}\*.log"
+Type: files; Name: "{app}\*.tmp"
+Type: filesandordirs; Name: "{app}"
 
 [Messages]
 ; Deutsche Meldungen
@@ -88,3 +126,61 @@ FinishedLabel={#MyAppName} wurde erfolgreich installiert.%n%nWICHTIG: Der Window
 
 [CustomMessages]
 CreateDesktopIcon=Desktop-Verknüpfung erstellen
+
+[Code]
+{ Pascal Script Code für erweiterte Deinstallation }
+
+procedure StopServiceWithSC();
+var
+  ResultCode: Integer;
+begin
+  { Versuche Service mit sc.exe zu stoppen }
+  Exec('sc.exe', 'stop BelegpilotService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(2000);
+  
+  { Versuche Service zu löschen }
+  Exec('sc.exe', 'delete BelegpilotService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
+end;
+
+procedure KillRunningProcesses();
+var
+  ResultCode: Integer;
+begin
+  { Kill alle laufenden Prozesse }
+  Exec('taskkill.exe', '/F /IM belegpilot.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM belegpilot_service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(2000);
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  { Vor der Deinstallation: Services und Prozesse beenden }
+  KillRunningProcesses();
+  StopServiceWithSC();
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+  AppDir: String;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    { Nach der Deinstallation: Versuche verbleibende Dateien zu löschen }
+    AppDir := ExpandConstant('{app}');
+    
+    { Nochmal kill falls wieder gestartet }
+    KillRunningProcesses();
+    
+    { Lösche _internal Ordner mit rmdir }
+    Exec('cmd.exe', '/c rmdir /s /q "' + AppDir + '\_internal"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    
+    { Lösche Service-EXE }
+    DeleteFile(AppDir + '\belegpilot_service.exe');
+    
+    { Lösche App-Verzeichnis }
+    Exec('cmd.exe', '/c rmdir /s /q "' + AppDir + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;

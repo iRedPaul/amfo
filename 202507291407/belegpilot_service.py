@@ -20,7 +20,7 @@ sys.path.insert(0, application_path)
 
 class BelegpilotService(win32serviceutil.ServiceFramework):
     _svc_name_ = "BelegpilotService"
-    _svc_display_name_ = "belegpilot Hotfolder Service"
+    _svc_display_name_ = "belegpilot Service"
     _svc_description_ = "Überwacht Ordner auf neue Dokumente und verarbeitet sie automatisch."
 
     def __init__(self, args):

@@ -91,8 +91,6 @@ class PDFProcessor:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         dependencies_dir = os.path.join(base_dir, 'dependencies')
         
-        logger.info("PDF-Komprimierung verwendet pypdf - keine externen Abhängigkeiten erforderlich")
-        
         # Prüfe Tesseract (für PDF/A-Export)
         if not self._is_tesseract_available():
             warnings.append("Tesseract nicht gefunden - PDF/A (Durchsuchbar) Export eingeschränkt")
@@ -215,7 +213,7 @@ class PDFProcessor:
                     if not self._validate_pdf(temp_pdf_path):
                         raise Exception(f"PDF-Validierung nach {action.value} fehlgeschlagen")
             
-            # Führe Exporte durch
+            # Führe Exporte durch ODER verschiebe in Error wenn keine Exporte
             if hasattr(hotfolder, 'export_configs') and hotfolder.export_configs:
                 ocr_zones = [
                     zone if isinstance(zone, dict) else zone.to_dict()
@@ -237,6 +235,31 @@ class PDFProcessor:
                 if not all_successful:
                     failed_exports = [msg for success, msg in export_results if not success]
                     raise Exception(f"Export-Fehler: {', '.join(failed_exports)}")
+            else:
+                # Keine Exporte konfiguriert - verschiebe in Error-Ordner
+                logger.info("Keine Exporte konfiguriert - verschiebe Dateien in Error-Ordner")
+                
+                error_path = self._get_error_path(doc_pair, hotfolder)
+                os.makedirs(error_path, exist_ok=True)
+                
+                # Verschiebe PDF
+                error_pdf = os.path.join(error_path, os.path.basename(doc_pair.pdf_path))
+                if os.path.exists(error_pdf):
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    base, ext = os.path.splitext(error_pdf)
+                    error_pdf = f"{base}_{timestamp}{ext}"
+                shutil.move(temp_pdf_path, error_pdf)
+                
+                # Verschiebe XML wenn vorhanden
+                if temp_xml_path and os.path.exists(temp_xml_path):
+                    error_xml = os.path.join(error_path, os.path.basename(doc_pair.xml_path or "temp_fields.xml"))
+                    if os.path.exists(error_xml):
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        base, ext = os.path.splitext(error_xml)
+                        error_xml = f"{base}_{timestamp}{ext}"
+                    shutil.move(temp_xml_path, error_xml)
+                
+                logger.info(f"Dateien ohne Export in Error-Ordner verschoben: {error_path}")
             
             # Abschließende Qualitätskontrolle
             final_info = self._analyze_pdf(temp_pdf_path)
@@ -287,7 +310,7 @@ class PDFProcessor:
                     shutil.rmtree(work_dir)
             except Exception as cleanup_error:
                 logger.error(f"Fehler beim Aufräumen: {cleanup_error}")
-            
+           
     def _validate_pdf(self, pdf_path: str) -> bool:
         """Validiert ob PDF gültig und nicht beschädigt ist"""
         try:

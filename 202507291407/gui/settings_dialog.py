@@ -66,7 +66,13 @@ class SettingsDialog:
         """Stellt sicher, dass ein Standard-Fehlerordner existiert"""
         if not self.settings.default_error_path:
             # Erstelle Standard-Fehlerordner im Hauptverzeichnis
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if getattr(sys, 'frozen', False):
+                # Wenn als EXE ausgeführt - verwende das Verzeichnis der EXE
+                base_dir = os.path.dirname(sys.executable)
+            else:
+                # Wenn als Python-Script ausgeführt
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
             default_error_path = os.path.join(base_dir, 'error')
             os.makedirs(default_error_path, exist_ok=True)
             self.settings.default_error_path = default_error_path

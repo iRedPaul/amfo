@@ -954,6 +954,10 @@ class ExportProcessor:
 
     def sanitize_filename(self, filename: str) -> str:
         """Bereinigt Dateinamen für Windows/Unix"""
+        # Entferne alle Arten von Whitespace (Zeilenumbrüche, Tabs, etc.) 
+        # und ersetze sie durch ein einzelnes Leerzeichen
+        filename = re.sub(r'\s+', ' ', filename)
+        
         # Entferne ungültige Zeichen
         invalid_chars = '<>:"|?*\x00'
         for char in invalid_chars:

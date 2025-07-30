@@ -918,15 +918,19 @@ class ExportProcessor:
 
     def get_error_path(self, error_path_expression: str, context: Dict[str, Any]) -> str:
         """Bestimmt Fehlerpfad"""
+        # 1. Prüfe zuerst ob ein Ausdruck angegeben wurde
         if error_path_expression:
             return self.function_parser.parse_and_evaluate(error_path_expression, context)
 
+        # 2. Verwende Einstellungen aus settings.json
         settings = self._get_export_settings()
         if settings.default_error_path:
-            return settings.default_error_path
+            # Verwende den Pfad aus den Einstellungen
+            error_path = settings.default_error_path
+            os.makedirs(error_path, exist_ok=True)
+            return error_path
 
-        # error-Ordner im Hauptverzeichnis
-        # Verwende das Verzeichnis wo die EXE liegt
+        # 3. Fallback: Standard error-Ordner im Hauptverzeichnis
         if getattr(sys, 'frozen', False):
             # Wenn als EXE ausgeführt
             base_dir = os.path.dirname(sys.executable)
@@ -937,6 +941,16 @@ class ExportProcessor:
         default_error_path = os.path.join(base_dir, 'error')
         os.makedirs(default_error_path, exist_ok=True)
         return default_error_path
+        
+    def _save_export_settings(self, settings: ExportSettings):
+        """Speichert die Export-Einstellungen"""
+        try:
+            settings_file = "config/settings.json"
+            with open(settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings.to_dict(), f, indent=2, ensure_ascii=False)
+            self._export_settings = settings  # Cache aktualisieren
+        except Exception as e:
+            logger.error(f"Fehler beim Speichern der Einstellungen: {e}")
 
     def sanitize_filename(self, filename: str) -> str:
         """Bereinigt Dateinamen für Windows/Unix"""

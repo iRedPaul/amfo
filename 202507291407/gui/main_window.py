@@ -509,7 +509,7 @@ class MainWindow:
             aktiv_symbol = "✓" if hotfolder.enabled else "✗"
             tag = "enabled" if hotfolder.enabled else "disabled"
             
-            description = hotfolder.description or "Keine Beschreibung"
+            description = hotfolder.description or ""
             
             # Füge Item mit ID und Farb-Tag hinzu
             self.tree.insert("", "end", iid=hotfolder.id, values=(aktiv_symbol, hotfolder.name, description), tags=(tag,))

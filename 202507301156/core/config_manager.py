@@ -270,8 +270,8 @@ class ConfigManager:
             # Füge Hotfolder hinzu
             self.add_hotfolder(imported_hotfolder)
             
-            logger.info(f"Hotfolder '{imported_hotfolder.name}' importiert (deaktiviert)")
-            return True, f"Hotfolder '{imported_hotfolder.name}' erfolgreich importiert (deaktiviert)"
+            logger.info(f"Hotfolder '{imported_hotfolder.name}' importiert")
+            return True, f"Hotfolder '{imported_hotfolder.name}' erfolgreich importiert"
             
         except json.JSONDecodeError as e:
             logger.error(f"JSON-Fehler beim Importieren: {e}")

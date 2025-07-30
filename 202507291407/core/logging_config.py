@@ -8,7 +8,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
+class HotfolderFileHandler(logging.handlers.BaseRotatingHandler):
     """Custom Handler für tägliche Logs mit speziellem Dateinamen-Format"""
     
     def __init__(self, log_dir, **kwargs):
@@ -16,25 +16,40 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
         self.log_dir.mkdir(exist_ok=True)
         
         # Basis-Dateiname für heute
-        filename = self.log_dir / f"belegpilot_{datetime.now().strftime('%Y-%m-%d')}.log"
+        self.current_date = datetime.now().date()
+        filename = self._get_filename_for_date(self.current_date)
         
-        super().__init__(
-            filename=filename,
-            when='midnight',
-            interval=1,
-            backupCount=0,  # Wir machen eigenes Cleanup
-            encoding='utf-8',
-            **kwargs
-        )
+        # Rufe BaseRotatingHandler.__init__ direkt auf
+        logging.handlers.BaseRotatingHandler.__init__(self, filename, 'a', encoding='utf-8')
         
         # Cleanup alter Logs beim Start
         self.cleanup_old_logs(30)
     
+    def _get_filename_for_date(self, date):
+        """Generiert Dateinamen für ein bestimmtes Datum"""
+        return str(self.log_dir / f"belegpilot_{date.strftime('%Y-%m-%d')}.log")
+    
+    def shouldRollover(self, record):
+        """Prüft ob ein Rollover notwendig ist"""
+        current_date = datetime.now().date()
+        if current_date != self.current_date:
+            return True
+        return False
+    
     def doRollover(self):
-        """Überschreibe Rollover für custom Dateinamen"""
-        super().doRollover()
-        # Neuer Dateiname für den neuen Tag
-        self.baseFilename = str(self.log_dir / f"belegpilot_{datetime.now().strftime('%Y-%m-%d')}.log")
+        """Führt den Rollover durch"""
+        # Schließe aktuelle Datei
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        
+        # Aktualisiere Datum und Dateinamen
+        self.current_date = datetime.now().date()
+        self.baseFilename = self._get_filename_for_date(self.current_date)
+        
+        # Öffne neue Datei
+        self.stream = self._open()
+        
         # Cleanup nach Rollover
         self.cleanup_old_logs(30)
     
@@ -45,11 +60,19 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
             deleted_count = 0
             error_count = 0
             
-            # Korrigiertes glob-Pattern
-            for log_file in self.log_dir.glob("belegpilot_*.log"):
+            # Suche nach allen belegpilot Log-Dateien
+            for log_file in self.log_dir.glob("belegpilot_*.log*"):
+                # Skip aktuelle Datei
+                if str(log_file) == self.baseFilename:
+                    continue
+                    
                 # Extrahiere Datum aus Dateiname
                 try:
-                    date_str = log_file.stem.replace("belegpilot_", "")
+                    # Entferne alle Suffixe und extrahiere Datum
+                    filename = log_file.stem
+                    if '.' in filename:
+                        filename = filename.split('.')[0]
+                    date_str = filename.replace("belegpilot_", "")
                     file_date = datetime.strptime(date_str, "%Y-%m-%d")
                     
                     if file_date < cutoff_date:
@@ -65,8 +88,15 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
                             logging.error(f"Fehler beim Löschen von {log_file.name}: {e}")
                             
                 except ValueError:
-                    # Ignoriere Dateien mit ungültigem Datumformat
-                    logging.debug(f"Überspringe Datei mit ungültigem Datumformat: {log_file.name}")
+                    # Lösche ungültige Log-Dateien die älter als 30 Tage sind
+                    try:
+                        file_mtime = datetime.fromtimestamp(log_file.stat().st_mtime)
+                        if file_mtime < cutoff_date:
+                            log_file.unlink()
+                            deleted_count += 1
+                            logging.info(f"Ungültige alte Log-Datei gelöscht: {log_file.name}")
+                    except Exception:
+                        pass
                     
             # Log zusammenfassende Information
             if deleted_count > 0:
@@ -76,7 +106,7 @@ class HotfolderFileHandler(logging.handlers.TimedRotatingFileHandler):
                     
         except Exception as e:
             logging.error(f"Kritischer Fehler beim Aufräumen alter Logs: {e}", exc_info=True)
-
+            
 
 def setup_logging(log_dir=None, log_level=logging.INFO):
     """

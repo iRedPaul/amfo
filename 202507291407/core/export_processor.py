@@ -925,8 +925,15 @@ class ExportProcessor:
         if settings.default_error_path:
             return settings.default_error_path
 
-        # Standard: error-Ordner im Programmverzeichnis
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # error-Ordner im Hauptverzeichnis
+        # Verwende das Verzeichnis wo die EXE liegt
+        if getattr(sys, 'frozen', False):
+            # Wenn als EXE ausgeführt
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            # Wenn als Python-Script ausgeführt
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
         default_error_path = os.path.join(base_dir, 'error')
         os.makedirs(default_error_path, exist_ok=True)
         return default_error_path

@@ -7,7 +7,7 @@
 #define MyServiceExeName "belegpilot_service.exe"
 
 [Setup]
-AppId={{A7B3F4E2-9C8D-4F2A-B6E1-5E7F8A9E2C1B}
+AppId={{A7B3F4E2-9C8D-4F2A-B6E1-5E9F3A9E3C1B}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -122,7 +122,7 @@ Type: filesandordirs; Name: "{app}"
 ; Deutsche Meldungen
 SetupAppTitle=Installation von {#MyAppName}
 SetupWindowTitle=Installation von {#MyAppName} {#MyAppVersion}
-FinishedLabel={#MyAppName} wurde erfolgreich installiert.%n%nWICHTIG: Der Windows-Dienst muss noch konfiguriert werden!%n%n1. Öffnen Sie services.msc%n2. Suchen Sie "belegpilot Hotfolder Service"%n3. Rechtklick → Eigenschaften → Anmelden%n4. Wählen Sie ein Benutzerkonto%n5. Setzen Sie Starttyp auf "Automatisch"%n6. Starten Sie den Dienst
+FinishedLabel={#MyAppName} wurde erfolgreich installiert.%n%nWICHTIG: Der Windows-Dienst muss noch konfiguriert werden!%n%n1. Öffnen Sie services.msc%n2. Suchen Sie "belegpilot Service"%n3. Rechtklick → Eigenschaften → Anmelden%n4. Wählen Sie ein Benutzerkonto%n5. Setzen Sie Starttyp auf "Automatisch"%n6. Starten Sie den Dienst
 
 [CustomMessages]
 CreateDesktopIcon=Desktop-Verknüpfung erstellen

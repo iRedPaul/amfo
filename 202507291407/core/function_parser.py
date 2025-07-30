@@ -518,12 +518,17 @@ class FunctionParser:
     
     # Reguläre Ausdrücke
     def _regexp_match(self, var: str, pattern: str, 
-                      submatch_index: str = "0") -> str:
-        """REGEXP.MATCH Funktion"""
+                      submatch_index: str = "1") -> str:
+        """REGEXP.MATCH Funktion - 1-basierte Indizierung"""
         try:
             matches = re.findall(pattern, var)
             if matches:
-                idx = int(submatch_index)
+                idx = int(submatch_index) - 1  # Konvertiere zu 0-basiertem Index
+                
+                # Stelle sicher, dass der Index gültig ist
+                if idx < 0:
+                    idx = 0
+                    
                 if isinstance(matches[0], tuple):
                     # Gruppen-Match
                     if idx < len(matches[0]):
@@ -532,6 +537,8 @@ class FunctionParser:
                     # Einfacher Match
                     if idx == 0 and len(matches) > 0:
                         return matches[0]
+                    elif idx < len(matches):
+                        return matches[idx]
             return ""
         except Exception as e:
             logger.error(f"Fehler bei REGEXP.MATCH: {e}")

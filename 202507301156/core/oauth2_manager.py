@@ -18,6 +18,7 @@ import keyring
 import platform
 import requests
 import logging
+import shutil
 
 # Logger für dieses Modul
 logger = logging.getLogger(__name__)
@@ -60,13 +61,13 @@ class OAuth2CallbackHandler(BaseHTTPRequestHandler):
                 query_string = self.path[query_start + 1:]
                 params = parse_qs(query_string)
                 
-                # Speichere Code oder Error
+                # Speichere Code oder Error und setze Event
                 if 'code' in params:
                     self.server.auth_code = params['code'][0]
+                    self.server.callback_received.set()  # Event setzen
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
-                    # HTML als String erstellen und dann zu bytes konvertieren
                     success_html = """
                         <html>
                         <body style="font-family: Arial, sans-serif; text-align: center; padding-top: 50px;">
@@ -78,6 +79,7 @@ class OAuth2CallbackHandler(BaseHTTPRequestHandler):
                     self.wfile.write(success_html.encode('utf-8'))
                 elif 'error' in params:
                     self.server.auth_error = params.get('error_description', ['Unbekannter Fehler'])[0]
+                    self.server.callback_received.set()  # Event setzen
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
@@ -149,12 +151,15 @@ class OAuth2Manager:
             self.server = HTTPServer(('localhost', 8080), OAuth2CallbackHandler)
             self.server.auth_code = None
             self.server.auth_error = None
-            self.server.timeout = 120  # 2 Minuten Timeout
+            self.server.callback_received = threading.Event()  # Event für Callback
             
             # Starte Server in separatem Thread
             self.server_thread = threading.Thread(target=self._run_server)
             self.server_thread.daemon = True
             self.server_thread.start()
+            
+            # Kurz warten, damit Server startet
+            time.sleep(0.5)
             
             # Baue Authorization URL
             auth_params = {
@@ -177,9 +182,10 @@ class OAuth2Manager:
             webbrowser.open(auth_url)
             logger.info("Browser für OAuth2-Authentifizierung geöffnet")
             
-            # Warte auf Callback
-            timeout = time.time() + 120  # 2 Minuten
-            while time.time() < timeout:
+            # Warte auf Callback mit Event
+            callback_received = self.server.callback_received.wait(timeout=120)  # 2 Minuten
+            
+            if callback_received:
                 if self.server.auth_code:
                     auth_code = self.server.auth_code
                     self._stop_server()
@@ -190,7 +196,6 @@ class OAuth2Manager:
                     self._stop_server()
                     logger.error(f"OAuth2-Autorisierung fehlgeschlagen: {error}")
                     return False, error
-                time.sleep(0.1)
             
             self._stop_server()
             logger.error("OAuth2-Authentifizierung: Timeout erreicht")
@@ -204,7 +209,9 @@ class OAuth2Manager:
     def _run_server(self):
         """Führt den HTTP-Server aus"""
         try:
-            while self.server:
+            # Server soll nur solange laufen bis Callback erhalten wurde
+            while not self.server.callback_received.is_set():
+                self.server.timeout = 1  # Kurzes Timeout für handle_request
                 self.server.handle_request()
         except Exception as e:
             logger.error(f"Fehler im OAuth2-Server: {e}")
@@ -212,10 +219,16 @@ class OAuth2Manager:
     def _stop_server(self):
         """Stoppt den HTTP-Server"""
         if self.server:
-            self.server.shutdown()
+            try:
+                # Event setzen, damit Server-Thread beendet wird
+                self.server.callback_received.set()
+                self.server.shutdown()
+                self.server.server_close()
+            except:
+                pass
             self.server = None
-        if self.server_thread:
-            self.server_thread.join(timeout=1)
+        if self.server_thread and self.server_thread.is_alive():
+            self.server_thread.join(timeout=2)
             self.server_thread = None
     
     def exchange_code_for_tokens(self, auth_code: str) -> Tuple[bool, Dict[str, str]]:
@@ -408,6 +421,26 @@ class OAuth2TokenStorage:
                     os.remove(self.storage_file)
                 os.rename(backup_file, self.storage_file)
                 logger.info("OAuth2-Token-Backup wiederhergestellt")
+    
+    def set_tokens(self, provider: str, email: str, tokens: Dict[str, str]):
+        """Speichert Tokens für ein Konto"""
+        key = f"{provider}:{email}"
+        self._tokens[key] = tokens
+        self.save_tokens()
+        logger.debug(f"Tokens für {key} gespeichert")
+    
+    def get_tokens(self, provider: str, email: str) -> Optional[Dict[str, str]]:
+        """Lädt Tokens für ein Konto"""
+        key = f"{provider}:{email}"
+        return self._tokens.get(key)
+    
+    def remove_tokens(self, provider: str, email: str):
+        """Entfernt Tokens für ein Konto"""
+        key = f"{provider}:{email}"
+        if key in self._tokens:
+            del self._tokens[key]
+            self.save_tokens()
+            logger.debug(f"Tokens für {key} entfernt")
 
 # Globale Token-Storage Instanz
 _token_storage = None

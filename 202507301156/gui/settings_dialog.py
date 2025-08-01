@@ -13,7 +13,7 @@ from PIL import Image, ImageTk
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.export_config import ExportSettings, AuthMethod
-from gui.oauth2_setup_dialog import OAuth2SetupDialog
+from gui.msgraph_setup_dialog import MSGraphSetupDialog
 from core.license_manager import get_license_manager
 from core.hotfolder_manager import HotfolderManager
 from core.config_manager import ConfigManager
@@ -144,8 +144,8 @@ class SettingsDialog:
         self.auth_basic_radio = ttk.Radiobutton(self.auth_frame, text="Standard (Benutzername/Passwort)", 
                                                variable=self.auth_method_var, value=AuthMethod.BASIC.value,
                                                command=self._on_auth_method_changed)
-        self.auth_oauth2_radio = ttk.Radiobutton(self.auth_frame, text="OAuth2 (Google, Microsoft)", 
-                                                variable=self.auth_method_var, value=AuthMethod.OAUTH2.value,
+        self.auth_msgraph_radio = ttk.Radiobutton(self.auth_frame, text="Microsoft Graph API", 
+                                                variable=self.auth_method_var, value=AuthMethod.MSGRAPH.value,
                                                 command=self._on_auth_method_changed)
         
         # SMTP-Server
@@ -186,27 +186,20 @@ class SettingsDialog:
                                             textvariable=self.smtp_password_var, width=40, 
                                             show="*")
         
-        # OAuth2-Konfiguration
-        self.oauth2_frame = ttk.LabelFrame(self.email_frame, text="OAuth2-Konfiguration", padding="10")
+        # Microsoft Graph-Konfiguration
+        self.msgraph_frame = ttk.LabelFrame(self.email_frame, text="Microsoft Graph API", padding="10")
         
-        self.oauth2_provider_label = ttk.Label(self.oauth2_frame, text="Anbieter:")
-        self.oauth2_provider_var = tk.StringVar()
-        self.oauth2_provider_combo = ttk.Combobox(self.oauth2_frame, 
-                                                 textvariable=self.oauth2_provider_var,
-                                                 values=["Gmail", "Outlook"],
-                                                 state="readonly", width=20)
+        self.msgraph_setup_button = ttk.Button(self.msgraph_frame, 
+                                            text="Microsoft Graph einrichten...", 
+                                            command=self._setup_msgraph)
         
-        self.oauth2_setup_button = ttk.Button(self.oauth2_frame, 
-                                            text="OAuth2 einrichten...", 
-                                            command=self._setup_oauth2)
-        
-        self.oauth2_status_label = ttk.Label(self.oauth2_frame, text="Status: Nicht konfiguriert", 
+        self.msgraph_status_label = ttk.Label(self.msgraph_frame, text="Status: Nicht konfiguriert", 
                                            foreground="red")
         
-        # OAuth2-Info
-        self.oauth2_info_frame = ttk.Frame(self.oauth2_frame)
-        self.oauth2_email_label = ttk.Label(self.oauth2_info_frame, text="E-Mail: -")
-        self.oauth2_client_label = ttk.Label(self.oauth2_info_frame, text="Client-ID: -")
+        # Microsoft Graph-Info
+        self.msgraph_info_frame = ttk.Frame(self.msgraph_frame)
+        self.msgraph_email_label = ttk.Label(self.msgraph_info_frame, text="E-Mail: -")
+        self.msgraph_client_label = ttk.Label(self.msgraph_info_frame, text="Client-ID: -")
         
         # Absender
         self.smtp_sender_frame = ttk.LabelFrame(self.email_frame, text="Absender", padding="10")
@@ -285,7 +278,7 @@ class SettingsDialog:
         # Authentifizierung
         self.auth_frame.pack(fill=tk.X, pady=(0, 10))
         self.auth_basic_radio.pack(anchor=tk.W)
-        self.auth_oauth2_radio.pack(anchor=tk.W, pady=(5, 0))
+        self.auth_msgraph_radio.pack(anchor=tk.W, pady=(5, 0))
         
         # SMTP-Server
         self.smtp_frame.pack(fill=tk.X, pady=(0, 10))
@@ -307,8 +300,8 @@ class SettingsDialog:
         self.smtp_password_entry.grid(row=1, column=1, sticky="we", pady=(5, 0))
         self.smtp_auth_frame.columnconfigure(1, weight=1)
         
-        # OAuth2 (initial versteckt)
-        self.oauth2_frame.pack_forget()
+        # Microsoft Graph (initial versteckt)
+        self.msgraph_frame.pack_forget()
         
         # Absender
         self.smtp_sender_frame.pack(fill=tk.X, pady=(0, 10))
@@ -350,12 +343,11 @@ class SettingsDialog:
         self.smtp_password_var.set(self.settings.smtp_password)
         self.smtp_from_var.set(self.settings.smtp_from_address)
         
-        # OAuth2
+        # Auth-Methode
         self.auth_method_var.set(self.settings.smtp_auth_method.value)
-        self.oauth2_provider_var.set(self.settings.oauth2_provider.capitalize() if self.settings.oauth2_provider else "Gmail")
         
-        # Update OAuth2 Status
-        self._update_oauth2_status()
+        # Update Microsoft Graph Status
+        self._update_msgraph_status()
         
         # Update UI basierend auf Auth-Methode
         self._on_auth_method_changed()
@@ -363,27 +355,27 @@ class SettingsDialog:
         # Lade Lizenzinfo
         self.dialog.after(100, self._load_license_info)
     
-    def _update_oauth2_status(self):
-        """Aktualisiert den OAuth2-Status in der UI"""
-        if self.settings.oauth2_refresh_token:
-            self.oauth2_status_label.config(text="Status: Konfiguriert ✓", foreground="green")
+    def _update_msgraph_status(self):
+        """Aktualisiert den Microsoft Graph Status in der UI"""
+        if self.settings.msgraph_refresh_token:
+            self.msgraph_status_label.config(text="Status: Konfiguriert ✓", foreground="green")
             
             # Zeige Info
             if self.settings.smtp_from_address:
-                self.oauth2_email_label.config(text=f"E-Mail: {self.settings.smtp_from_address}")
+                self.msgraph_email_label.config(text=f"E-Mail: {self.settings.smtp_from_address}")
             
-            if self.settings.oauth2_client_id:
+            if self.settings.msgraph_client_id:
                 # Zeige nur die ersten und letzten Zeichen der Client-ID
-                client_id = self.settings.oauth2_client_id
+                client_id = self.settings.msgraph_client_id
                 if len(client_id) > 20:
                     display_id = f"{client_id[:8]}...{client_id[-8:]}"
                 else:
                     display_id = client_id
-                self.oauth2_client_label.config(text=f"Client-ID: {display_id}")
+                self.msgraph_client_label.config(text=f"Client-ID: {display_id}")
         else:
-            self.oauth2_status_label.config(text="Status: Nicht konfiguriert", foreground="red")
-            self.oauth2_email_label.config(text="E-Mail: -")
-            self.oauth2_client_label.config(text="Client-ID: -")
+            self.msgraph_status_label.config(text="Status: Nicht konfiguriert", foreground="red")
+            self.msgraph_email_label.config(text="E-Mail: -")
+            self.msgraph_client_label.config(text="Client-ID: -")
     
     def _browse_error_path(self):
         """Öffnet Dialog zur Auswahl des Fehler-Pfads"""
@@ -398,22 +390,20 @@ class SettingsDialog:
         """Wird aufgerufen wenn die Auth-Methode geändert wird"""
         if self.auth_method_var.get() == AuthMethod.BASIC.value:
             self.smtp_auth_frame.pack(fill=tk.X, pady=(0, 10), before=self.smtp_sender_frame)
-            self.oauth2_frame.pack_forget()
+            self.msgraph_frame.pack_forget()
         else:
             self.smtp_auth_frame.pack_forget()
-            self.oauth2_frame.pack(fill=tk.X, pady=(0, 10), before=self.smtp_sender_frame)
+            self.msgraph_frame.pack(fill=tk.X, pady=(0, 10), before=self.smtp_sender_frame)
             
-            # Layout für OAuth2
-            self.oauth2_provider_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-            self.oauth2_provider_combo.grid(row=0, column=1, sticky=tk.W)
-            self.oauth2_setup_button.grid(row=1, column=0, columnspan=2, pady=(10, 5))
-            self.oauth2_status_label.grid(row=2, column=0, columnspan=2, pady=(5, 10))
+            # Layout für Microsoft Graph
+            self.msgraph_setup_button.grid(row=0, column=0, columnspan=2, pady=(0, 10))
+            self.msgraph_status_label.grid(row=1, column=0, columnspan=2, pady=(0, 10))
             
-            self.oauth2_info_frame.grid(row=3, column=0, columnspan=2, sticky="w")
-            self.oauth2_email_label.pack(anchor=tk.W)
-            self.oauth2_client_label.pack(anchor=tk.W, pady=(2, 0))
+            self.msgraph_info_frame.grid(row=2, column=0, columnspan=2, sticky="w")
+            self.msgraph_email_label.pack(anchor=tk.W)
+            self.msgraph_client_label.pack(anchor=tk.W, pady=(2, 0))
             
-            self.oauth2_frame.columnconfigure(1, weight=1)
+            self.msgraph_frame.columnconfigure(1, weight=1)
     
     def _on_ssl_changed(self):
         """Wird aufgerufen wenn SSL-Option geändert wird"""
@@ -433,43 +423,36 @@ class SettingsDialog:
             if self.smtp_port_var.get() != 587:
                 self.smtp_port_var.set(587)
     
-    def _setup_oauth2(self):
-        """Öffnet OAuth2-Setup-Dialog"""
-        provider = self.oauth2_provider_var.get()
-        if not provider:
-            messagebox.showerror("Fehler", "Bitte wählen Sie einen OAuth2-Anbieter aus.")
-            return
-        
-        # Sammle aktuelle OAuth2-Settings
-        current_oauth2_settings = {
-            'oauth2_provider': provider.lower(),  # Konvertiere zu Kleinbuchstaben
-            'oauth2_client_id': self.settings.oauth2_client_id,
-            'oauth2_client_secret': self.settings.oauth2_client_secret,
-            'oauth2_refresh_token': self.settings.oauth2_refresh_token,
-            'oauth2_access_token': self.settings.oauth2_access_token,
-            'oauth2_token_expiry': self.settings.oauth2_token_expiry,
+    def _setup_msgraph(self):
+        """Öffnet Microsoft Graph Setup-Dialog"""
+        # Sammle aktuelle Microsoft Graph-Settings
+        current_msgraph_settings = {
+            'msgraph_client_id': self.settings.msgraph_client_id,
+            'msgraph_client_secret': self.settings.msgraph_client_secret,
+            'msgraph_refresh_token': self.settings.msgraph_refresh_token,
+            'msgraph_access_token': self.settings.msgraph_access_token,
+            'msgraph_token_expiry': self.settings.msgraph_token_expiry,
             'smtp_from_address': self.smtp_from_var.get() or self.settings.smtp_from_address,
             'smtp_username': self.smtp_username_var.get() or self.settings.smtp_username
         }
         
-        dialog = OAuth2SetupDialog(self.dialog, provider, current_oauth2_settings)
+        dialog = MSGraphSetupDialog(self.dialog, current_msgraph_settings)
         result = dialog.show()
         
         if result:
-            # Update Settings mit OAuth2-Config
-            self.settings.oauth2_provider = result['oauth2_provider']
-            self.settings.oauth2_client_id = result['oauth2_client_id']
-            self.settings.oauth2_client_secret = result['oauth2_client_secret']
-            self.settings.oauth2_refresh_token = result['oauth2_refresh_token']
-            self.settings.oauth2_access_token = result['oauth2_access_token']
-            self.settings.oauth2_token_expiry = result['oauth2_token_expiry']
+            # Update Settings mit Microsoft Graph-Config
+            self.settings.msgraph_client_id = result['msgraph_client_id']
+            self.settings.msgraph_client_secret = result['msgraph_client_secret']
+            self.settings.msgraph_refresh_token = result['msgraph_refresh_token']
+            self.settings.msgraph_access_token = result['msgraph_access_token']
+            self.settings.msgraph_token_expiry = result['msgraph_token_expiry']
             
             # Update E-Mail-Adresse
             if result['smtp_from_address']:
                 self.smtp_from_var.set(result['smtp_from_address'])
             
             # Update Status
-            self._update_oauth2_status()
+            self._update_msgraph_status()
     
     def _test_email(self):
         """Testet die E-Mail-Einstellungen"""
@@ -486,10 +469,10 @@ class SettingsDialog:
                 messagebox.showerror("Fehler", 
                     "Für Standard-Authentifizierung müssen Benutzername und Passwort ausgefüllt sein.")
                 return
-        else:  # OAuth2
-            if not self.settings.oauth2_refresh_token:
+        else:  # Microsoft Graph
+            if not self.settings.msgraph_refresh_token:
                 messagebox.showerror("Fehler", 
-                    "Bitte richten Sie zuerst OAuth2 ein.")
+                    "Bitte richten Sie zuerst Microsoft Graph ein.")
                 return
         
         # Test-Dialog
@@ -504,15 +487,14 @@ class SettingsDialog:
             'auth_method': self.auth_method_var.get()
         }
         
-        # Füge OAuth2-Config hinzu wenn OAuth2
-        if self.auth_method_var.get() == AuthMethod.OAUTH2.value:
+        # Füge Microsoft Graph-Config hinzu wenn Microsoft Graph
+        if self.auth_method_var.get() == AuthMethod.MSGRAPH.value:
             config.update({
-                'oauth2_provider': self.settings.oauth2_provider,
-                'oauth2_access_token': self.settings.oauth2_access_token,
-                'oauth2_refresh_token': self.settings.oauth2_refresh_token,
-                'oauth2_token_expiry': self.settings.oauth2_token_expiry,
-                'oauth2_client_id': self.settings.oauth2_client_id,
-                'oauth2_client_secret': self.settings.oauth2_client_secret
+                'msgraph_access_token': self.settings.msgraph_access_token,
+                'msgraph_refresh_token': self.settings.msgraph_refresh_token,
+                'msgraph_token_expiry': self.settings.msgraph_token_expiry,
+                'msgraph_client_id': self.settings.msgraph_client_id,
+                'msgraph_client_secret': self.settings.msgraph_client_secret
             })
         
         dialog = EmailTestDialog(self.dialog, config)
@@ -712,10 +694,6 @@ class SettingsDialog:
         # Auth-Methode
         self.settings.smtp_auth_method = AuthMethod(self.auth_method_var.get())
         
-        # OAuth2-Provider nur updaten wenn OAuth2 ausgewählt
-        if self.auth_method_var.get() == AuthMethod.OAUTH2.value:
-            self.settings.oauth2_provider = self.oauth2_provider_var.get().lower()
-        
         # Speichere in Datei
         self._save_settings()
         
@@ -838,61 +816,86 @@ class EmailTestDialog:
     def _send_email_thread(self, recipient: str):
         """Sendet die E-Mail in einem separaten Thread"""
         try:
-            import smtplib
-            import ssl
-            from email.mime.text import MIMEText
-            from email.mime.multipart import MIMEMultipart
+            auth_method = "Microsoft Graph" if self.smtp_config.get('auth_method') == 'msgraph' else "Standard"
             
-            # OAuth2-Unterstützung
-            if self.smtp_config.get('auth_method') == 'oauth2':
-                # OAuth2-Authentifizierung
-                from core.oauth2_manager import OAuth2Manager, get_token_storage
+            if self.smtp_config.get('auth_method') == 'msgraph':
+                # Microsoft Graph API
+                from core.msgraph_manager import MSGraphManager, get_token_storage
                 
-                provider = self.smtp_config.get('oauth2_provider', 'gmail')
-                oauth2_manager = OAuth2Manager(provider)
+                msgraph_manager = MSGraphManager()
                 token_storage = get_token_storage()
                 
                 # Hole gespeicherte Tokens
-                tokens = token_storage.get_tokens(provider, self.smtp_config['from_address'])
+                tokens = token_storage.get_tokens(self.smtp_config['from_address'])
                 if not tokens:
                     tokens = {
-                        'access_token': self.smtp_config.get('oauth2_access_token', ''),
-                        'refresh_token': self.smtp_config.get('oauth2_refresh_token', ''),
-                        'token_expiry': self.smtp_config.get('oauth2_token_expiry', '')
+                        'access_token': self.smtp_config.get('msgraph_access_token', ''),
+                        'refresh_token': self.smtp_config.get('msgraph_refresh_token', ''),
+                        'token_expiry': self.smtp_config.get('msgraph_token_expiry', '')
                     }
                 
                 # Prüfe ob Token erneuert werden muss
-                if oauth2_manager.is_token_expired(tokens.get('token_expiry', '')):
+                if msgraph_manager.is_token_expired(tokens.get('token_expiry', '')):
                     # Token erneuern
-                    oauth2_manager.set_client_credentials(
-                        self.smtp_config.get('oauth2_client_id', ''),
-                        self.smtp_config.get('oauth2_client_secret', '')
+                    msgraph_manager.set_client_credentials(
+                        self.smtp_config.get('msgraph_client_id', ''),
+                        self.smtp_config.get('msgraph_client_secret', '')
                     )
                     
-                    success, new_tokens = oauth2_manager.refresh_access_token(
+                    success, new_tokens = msgraph_manager.refresh_access_token(
                         tokens.get('refresh_token', '')
                     )
                     
                     if success:
                         tokens = new_tokens
                         # Speichere neue Tokens
-                        token_storage.set_tokens(provider, self.smtp_config['from_address'], tokens)
+                        token_storage.set_tokens(self.smtp_config['from_address'], tokens)
                     else:
                         raise Exception(f"Token-Erneuerung fehlgeschlagen: {new_tokens.get('error', 'Unbekannter Fehler')}")
                 
                 access_token = tokens.get('access_token', '')
                 if not access_token:
                     raise Exception("Kein gültiger Access Token vorhanden")
-            
-            # Erstelle Nachricht
-            msg = MIMEMultipart()
-            msg['From'] = self.smtp_config['from_address']
-            msg['To'] = recipient
-            msg['Subject'] = "Hotfolder PDF Processor - Test-E-Mail"
-            
-            auth_method = "OAuth2" if self.smtp_config.get('auth_method') == 'oauth2' else "Standard"
-            
-            body = f"""Dies ist eine Test-E-Mail vom belegpilot.
+                
+                # Erstelle E-Mail-Body
+                body = f"""Dies ist eine Test-E-Mail vom belegpilot.
+
+Wenn Sie diese Nachricht erhalten, sind Ihre E-Mail-Einstellungen korrekt konfiguriert!
+
+Authentifizierung: {auth_method}
+Absender: {self.smtp_config['from_address']}
+
+Mit freundlichen Grüßen
+belegpilot"""
+                
+                # Sende E-Mail über Microsoft Graph
+                success, error = msgraph_manager.send_email(
+                    access_token,
+                    self.smtp_config['from_address'],
+                    [recipient],
+                    "Belegpilot - Test-E-Mail",
+                    body
+                )
+                
+                if success:
+                    self.dialog.after(0, self._on_success)
+                else:
+                    self.dialog.after(0, self._on_error, error)
+                
+            else:
+                # Standard SMTP
+                import smtplib
+                import ssl
+                from email.mime.text import MIMEText
+                from email.mime.multipart import MIMEMultipart
+                
+                # Erstelle Nachricht
+                msg = MIMEMultipart()
+                msg['From'] = self.smtp_config['from_address']
+                msg['To'] = recipient
+                msg['Subject'] = "Belegpilot - Test-E-Mail"
+                
+                body = f"""Dies ist eine Test-E-Mail vom belegpilot.
 
 Wenn Sie diese Nachricht erhalten, sind Ihre E-Mail-Einstellungen korrekt konfiguriert!
 
@@ -905,41 +908,32 @@ Absender: {self.smtp_config['from_address']}
 
 Mit freundlichen Grüßen
 belegpilot"""
-            
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
-            
-            # Verbinde zum Server
-            if self.smtp_config['use_ssl'] and self.smtp_config['port'] == 465:
-                # SSL direkt verwenden
-                context_ssl = ssl.create_default_context()
-                server = smtplib.SMTP_SSL(self.smtp_config['server'], 
-                                         self.smtp_config['port'], 
-                                         context=context_ssl)
-            else:
-                # Standard SMTP mit optionalem STARTTLS
-                server = smtplib.SMTP(self.smtp_config['server'], self.smtp_config['port'])
-                if self.smtp_config['use_tls']:
-                    server.starttls()
-            
-            # Anmeldung
-            if self.smtp_config.get('auth_method') == 'oauth2':
-                # OAuth2-Anmeldung
-                auth_string = oauth2_manager.create_oauth2_sasl_string(
-                    self.smtp_config['from_address'],
-                    access_token
-                )
-                server.docmd('AUTH', 'XOAUTH2 ' + auth_string)
-            else:
-                # Standard-Anmeldung
+                
+                msg.attach(MIMEText(body, 'plain', 'utf-8'))
+                
+                # Verbinde zum Server
+                if self.smtp_config['use_ssl'] and self.smtp_config['port'] == 465:
+                    # SSL direkt verwenden
+                    context_ssl = ssl.create_default_context()
+                    server = smtplib.SMTP_SSL(self.smtp_config['server'], 
+                                             self.smtp_config['port'], 
+                                             context=context_ssl)
+                else:
+                    # Standard SMTP mit optionalem STARTTLS
+                    server = smtplib.SMTP(self.smtp_config['server'], self.smtp_config['port'])
+                    if self.smtp_config['use_tls']:
+                        server.starttls()
+                
+                # Anmeldung
                 if self.smtp_config['username'] and self.smtp_config['password']:
                     server.login(self.smtp_config['username'], self.smtp_config['password'])
-            
-            # Sende E-Mail
-            server.send_message(msg)
-            server.quit()
-            
-            # Erfolg
-            self.dialog.after(0, self._on_success)
+                
+                # Sende E-Mail
+                server.send_message(msg)
+                server.quit()
+                
+                # Erfolg
+                self.dialog.after(0, self._on_success)
             
         except Exception as e:
             # Fehler

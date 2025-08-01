@@ -337,13 +337,13 @@ class SettingsManager:
                 "use_tls": True
             },
             "auth": {
-                "method": "basic",  # basic, oauth2
+                "method": "basic",  # basic, msgraph
                 "basic": {
                     "username": "",
                     "password": "",
                     "from_address": ""
                 },
-                "oauth2": {
+                "msgraph": {
                     "provider": "",
                     "client_id": "",
                     "client_secret": "",

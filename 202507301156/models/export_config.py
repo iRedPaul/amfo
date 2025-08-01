@@ -26,7 +26,7 @@ class ExportMethod(Enum):
 class AuthMethod(Enum):
     """Authentifizierungsmethoden"""
     BASIC = "basic"
-    OAUTH2 = "oauth2"
+    MSGRAPH  = "msgraph"
 
 
 @dataclass
@@ -117,13 +117,13 @@ class ExportSettings:
     smtp_use_ssl: bool = False
     smtp_auth_method: AuthMethod = AuthMethod.BASIC
     
-    # OAuth2 Einstellungen
-    oauth2_provider: str = ""
-    oauth2_client_id: str = ""
-    oauth2_client_secret: str = ""
-    oauth2_access_token: str = ""
-    oauth2_refresh_token: str = ""
-    oauth2_token_expiry: str = ""
+    # Microsoft Graph Einstellungen
+    msgraph_provider: str = ""
+    msgraph_client_id: str = ""
+    msgraph_client_secret: str = ""
+    msgraph_access_token: str = ""
+    msgraph_refresh_token: str = ""
+    msgraph_token_expiry: str = ""
     
     # Pfad-Einstellungen
     default_export_path: str = ""
@@ -147,12 +147,12 @@ class ExportSettings:
             "smtp_use_tls": self.smtp_use_tls,
             "smtp_use_ssl": self.smtp_use_ssl,
             "smtp_auth_method": self.smtp_auth_method.value,
-            "oauth2_provider": self.oauth2_provider,
-            "oauth2_client_id": self.oauth2_client_id,
-            "oauth2_client_secret": self.oauth2_client_secret,
-            "oauth2_access_token": self.oauth2_access_token,
-            "oauth2_refresh_token": self.oauth2_refresh_token,
-            "oauth2_token_expiry": self.oauth2_token_expiry,
+            "msgraph_provider": self.msgraph_provider,
+            "msgraph_client_id": self.msgraph_client_id,
+            "msgraph_client_secret": self.msgraph_client_secret,
+            "msgraph_access_token": self.msgraph_access_token,
+            "msgraph_refresh_token": self.msgraph_refresh_token,
+            "msgraph_token_expiry": self.msgraph_token_expiry,
             "default_export_path": self.default_export_path,
             "default_error_path": self.default_error_path,
             "ocr_default_language": self.ocr_default_language,
@@ -168,8 +168,8 @@ class ExportSettings:
         field_names = {
             'smtp_server', 'smtp_port', 'smtp_username', 'smtp_password',
             'smtp_from_address', 'smtp_use_tls', 'smtp_use_ssl', 'smtp_auth_method',
-            'oauth2_provider', 'oauth2_client_id', 'oauth2_client_secret',
-            'oauth2_access_token', 'oauth2_refresh_token', 'oauth2_token_expiry',
+            'msgraph_provider', 'msgraph_client_id', 'msgraph_client_secret',
+            'msgraph_access_token', 'msgraph_refresh_token', 'msgraph_token_expiry',
             'default_export_path', 'default_error_path',
             'ocr_default_language', 'ocr_additional_languages'
         }

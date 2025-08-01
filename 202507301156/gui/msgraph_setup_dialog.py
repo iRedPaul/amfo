@@ -1,5 +1,5 @@
 """
-OAuth2 Setup Dialog für E-Mail-Konfiguration
+Microsoft Graph Setup Dialog für E-Mail-Konfiguration
 """
 import sys
 import os
@@ -10,21 +10,20 @@ from PIL import Image, ImageTk
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.oauth2_manager import OAuth2Manager, get_token_storage
+from core.msgraph_manager import MSGraphManager, get_token_storage
 
 
-class OAuth2SetupDialog:
-    """Dialog zur OAuth2-Einrichtung"""
+class MSGraphSetupDialog:
+    """Dialog zur Microsoft Graph Einrichtung"""
     
-    def __init__(self, parent, provider: str, current_settings: Dict[str, str]):
+    def __init__(self, parent, current_settings: Dict[str, str]):
         self.parent = parent
-        self.provider = provider
         self.current_settings = current_settings
         self.result = None
         
         # Dialog erstellen
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title(f"OAuth2 Setup - {provider}")
+        self.dialog.title("Microsoft Graph Setup")
         self.dialog.geometry("700x650")
         self.dialog.resizable(False, False)
         
@@ -39,8 +38,8 @@ class OAuth2SetupDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
-        # OAuth2 Manager
-        self.oauth2_manager = OAuth2Manager(provider)
+        # Microsoft Graph Manager
+        self.msgraph_manager = MSGraphManager()
         self.token_storage = get_token_storage()
         
         self._create_widgets()
@@ -75,13 +74,13 @@ class OAuth2SetupDialog:
         self.instruction_text.config(state=tk.DISABLED)
         
         # Client-Credentials
-        self.creds_frame = ttk.LabelFrame(self.main_frame, text="OAuth2 Client-Anmeldeinformationen", padding="15")
+        self.creds_frame = ttk.LabelFrame(self.main_frame, text="Azure App-Registrierung", padding="15")
         
-        self.client_id_label = ttk.Label(self.creds_frame, text="Client-ID:")
+        self.client_id_label = ttk.Label(self.creds_frame, text="Application (Client) ID:")
         self.client_id_var = tk.StringVar()
         self.client_id_entry = ttk.Entry(self.creds_frame, textvariable=self.client_id_var, width=60)
         
-        self.client_secret_label = ttk.Label(self.creds_frame, text="Client-Secret:")
+        self.client_secret_label = ttk.Label(self.creds_frame, text="Client Secret:")
         self.client_secret_var = tk.StringVar()
         self.client_secret_entry = ttk.Entry(self.creds_frame, textvariable=self.client_secret_var, width=60, show="*")
         
@@ -149,41 +148,25 @@ class OAuth2SetupDialog:
         self.save_button.pack(side=tk.RIGHT)
     
     def _get_instructions(self) -> str:
-        """Gibt anbieterspezifische Anleitungen zurück"""
-        if self.provider.lower() == "gmail":
-            return """So richten Sie OAuth2 für Gmail ein:
-
-1. Gehen Sie zur Google Cloud Console: https://console.cloud.google.com/
-2. Erstellen Sie ein neues Projekt oder wählen Sie ein bestehendes
-3. Aktivieren Sie die Gmail API für Ihr Projekt
-4. Gehen Sie zu "Anmeldedaten" und erstellen Sie OAuth2-Client-ID
-5. Wählen Sie "Desktop-App" als Anwendungstyp
-6. Fügen Sie http://localhost:8080/callback als Redirect-URI hinzu
-7. Kopieren Sie Client-ID und Client-Secret hierher
-
-Hinweis: Ihr Google-Konto muss App-Zugriff erlauben."""
-        
-        elif self.provider.lower() in ["outlook", "office365"]:
-            return """So richten Sie OAuth2 für Outlook/Office 365 ein:
+        """Gibt Anleitungen zurück"""
+        return """So richten Sie Microsoft Graph API für E-Mail-Versand ein:
 
 1. Gehen Sie zum Azure Portal: https://portal.azure.com/
 2. Navigieren Sie zu "App-Registrierungen" und erstellen Sie eine neue App
 3. Wählen Sie "Konten in einem beliebigen Organisationsverzeichnis und persönliche Microsoft-Konten"
 4. Fügen Sie http://localhost:8080/callback als Redirect-URI hinzu (Typ: Web)
-5. Gehen Sie zu "Zertifikate & Geheimnisse" und erstellen Sie ein neues Client-Secret
-6. Kopieren Sie die Application (client) ID und das Secret hierher
-7. Fügen Sie unter "API-Berechtigungen" die Berechtigung "SMTP.Send" hinzu
+5. Gehen Sie zu "Zertifikate & Geheimnisse" und erstellen Sie ein neues Client Secret
+6. Notieren Sie sich das Secret - es wird nur einmal angezeigt!
+7. Kopieren Sie die Application (client) ID und das Secret hierher
+8. Fügen Sie unter "API-Berechtigungen" die Berechtigung "Mail.Send" hinzu
 
-Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuert werden."""
-        
-        else:
-            return "Konfigurationsanleitung für diesen Anbieter nicht verfügbar."
+Wichtig: Das Client Secret läuft nach der gewählten Zeitspanne ab und muss dann erneuert werden."""
     
     def _load_current_settings(self):
         """Lädt die aktuellen Einstellungen"""
         # Client Credentials
-        self.client_id_var.set(self.current_settings.get('oauth2_client_id', ''))
-        self.client_secret_var.set(self.current_settings.get('oauth2_client_secret', ''))
+        self.client_id_var.set(self.current_settings.get('msgraph_client_id', ''))
+        self.client_secret_var.set(self.current_settings.get('msgraph_client_secret', ''))
         
         # E-Mail
         email = self.current_settings.get('smtp_from_address', '')
@@ -192,7 +175,7 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
         self.email_var.set(email)
         
         # Prüfe ob bereits authentifiziert
-        if email and self.current_settings.get('oauth2_refresh_token'):
+        if email and self.current_settings.get('msgraph_refresh_token'):
             self._update_status(True)
     
     def _update_status(self, authenticated: bool):
@@ -207,7 +190,7 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
             self.save_button.config(state=tk.DISABLED)
     
     def _start_authentication(self):
-        """Startet den OAuth2-Authentifizierungsfluss"""
+        """Startet den Microsoft Graph Authentifizierungsfluss"""
         # Validiere Eingaben
         if not self.client_id_var.get() or not self.client_secret_var.get():
             messagebox.showerror("Fehler", "Bitte geben Sie Client-ID und Client-Secret ein.")
@@ -224,23 +207,23 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
         self.progress_bar.start()
         
         # Setze Client Credentials
-        self.oauth2_manager.set_client_credentials(
+        self.msgraph_manager.set_client_credentials(
             self.client_id_var.get(),
             self.client_secret_var.get()
         )
         
-        # Starte OAuth2-Flow in Thread
+        # Starte Microsoft Graph Flow in Thread
         import threading
         thread = threading.Thread(target=self._auth_flow_thread)
         thread.daemon = True
         thread.start()
     
     def _auth_flow_thread(self):
-        """Führt den OAuth2-Flow in einem separaten Thread aus"""
+        """Führt den Microsoft Graph Flow in einem separaten Thread aus"""
         try:
             # Phase 1: Authorization
             self.dialog.after(0, self._update_progress, "Öffne Browser für Autorisierung...")
-            success, result = self.oauth2_manager.start_auth_flow()
+            success, result = self.msgraph_manager.start_auth_flow()
             
             if not success:
                 self.dialog.after(0, self._auth_failed, result)
@@ -250,7 +233,7 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
             
             # Phase 2: Token Exchange
             self.dialog.after(0, self._update_progress, "Tausche Autorisierungscode gegen Token...")
-            success, tokens = self.oauth2_manager.exchange_code_for_tokens(auth_code)
+            success, tokens = self.msgraph_manager.exchange_code_for_tokens(auth_code)
             
             if not success:
                 self.dialog.after(0, self._auth_failed, tokens.get('error', 'Unbekannter Fehler'))
@@ -258,7 +241,6 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
             
             # Speichere Tokens
             self.token_storage.set_tokens(
-                self.provider.lower(),
                 self.email_var.get(),
                 tokens
             )
@@ -281,13 +263,13 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
         self.auth_button.config(state=tk.NORMAL)
         
         # Speichere Token-Infos
-        self.current_settings['oauth2_access_token'] = tokens['access_token']
-        self.current_settings['oauth2_refresh_token'] = tokens['refresh_token']
-        self.current_settings['oauth2_token_expiry'] = tokens['token_expiry']
+        self.current_settings['msgraph_access_token'] = tokens['access_token']
+        self.current_settings['msgraph_refresh_token'] = tokens['refresh_token']
+        self.current_settings['msgraph_token_expiry'] = tokens['token_expiry']
         
         self._update_status(True)
         
-        messagebox.showinfo("Erfolg", "OAuth2-Authentifizierung erfolgreich abgeschlossen!")
+        messagebox.showinfo("Erfolg", "Microsoft Graph Authentifizierung erfolgreich abgeschlossen!")
     
     def _auth_failed(self, error: str):
         """Wird bei fehlgeschlagener Authentifizierung aufgerufen"""
@@ -303,12 +285,12 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
         if messagebox.askyesno("Authentifizierung entfernen", 
                               "Möchten Sie die gespeicherte Authentifizierung wirklich entfernen?"):
             # Entferne aus Token Storage
-            self.token_storage.remove_tokens(self.provider.lower(), self.email_var.get())
+            self.token_storage.remove_tokens(self.email_var.get())
             
             # Lösche Token aus Settings
-            self.current_settings['oauth2_access_token'] = ''
-            self.current_settings['oauth2_refresh_token'] = ''
-            self.current_settings['oauth2_token_expiry'] = ''
+            self.current_settings['msgraph_access_token'] = ''
+            self.current_settings['msgraph_refresh_token'] = ''
+            self.current_settings['msgraph_token_expiry'] = ''
             
             self._update_status(False)
             messagebox.showinfo("Entfernt", "Authentifizierung wurde entfernt.")
@@ -316,13 +298,12 @@ Wichtig: Das Client-Secret läuft nach einer bestimmten Zeit ab und muss erneuer
     def _on_save(self):
         """Speichert die Einstellungen"""
         self.result = {
-            'oauth2_provider': self.provider.lower(),
-            'oauth2_client_id': self.client_id_var.get(),
-            'oauth2_client_secret': self.client_secret_var.get(),
+            'msgraph_client_id': self.client_id_var.get(),
+            'msgraph_client_secret': self.client_secret_var.get(),
             'smtp_from_address': self.email_var.get(),
-            'oauth2_access_token': self.current_settings.get('oauth2_access_token', ''),
-            'oauth2_refresh_token': self.current_settings.get('oauth2_refresh_token', ''),
-            'oauth2_token_expiry': self.current_settings.get('oauth2_token_expiry', '')
+            'msgraph_access_token': self.current_settings.get('msgraph_access_token', ''),
+            'msgraph_refresh_token': self.current_settings.get('msgraph_refresh_token', ''),
+            'msgraph_token_expiry': self.current_settings.get('msgraph_token_expiry', '')
         }
         
         self.dialog.destroy()

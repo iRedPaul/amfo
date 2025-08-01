@@ -33,7 +33,7 @@ class SettingsDialog:
         # Dialog erstellen
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Einstellungen")
-        self.dialog.geometry("700x750")
+        self.dialog.geometry("700x650")
         self.dialog.resizable(False, False)
         
         # Fenster-Icon
@@ -280,7 +280,7 @@ class SettingsDialog:
         self.auth_basic_radio.pack(anchor=tk.W)
         self.auth_msgraph_radio.pack(anchor=tk.W, pady=(5, 0))
         
-        # SMTP-Server
+        # SMTP-Server (wird bei Microsoft Graph ausgeblendet)
         self.smtp_frame.pack(fill=tk.X, pady=(0, 10))
         self.smtp_server_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
         self.smtp_server_entry.grid(row=0, column=1, sticky="we")
@@ -389,9 +389,13 @@ class SettingsDialog:
     def _on_auth_method_changed(self):
         """Wird aufgerufen wenn die Auth-Methode geändert wird"""
         if self.auth_method_var.get() == AuthMethod.BASIC.value:
+            # Bei Standard-Auth: SMTP-Server und Standard-Anmeldung anzeigen
+            self.smtp_frame.pack(fill=tk.X, pady=(0, 10), after=self.auth_frame)
             self.smtp_auth_frame.pack(fill=tk.X, pady=(0, 10), before=self.smtp_sender_frame)
             self.msgraph_frame.pack_forget()
         else:
+            # Bei Microsoft Graph: Nur Microsoft Graph-Frame anzeigen
+            self.smtp_frame.pack_forget()
             self.smtp_auth_frame.pack_forget()
             self.msgraph_frame.pack(fill=tk.X, pady=(0, 10), before=self.smtp_sender_frame)
             
@@ -456,15 +460,20 @@ class SettingsDialog:
     
     def _test_email(self):
         """Testet die E-Mail-Einstellungen"""
-        # Prüfe ob alle erforderlichen Felder ausgefüllt sind
-        if not all([self.smtp_server_var.get(), self.smtp_port_var.get(), 
-                   self.smtp_from_var.get()]):
+        # Prüfe ob Absender-Adresse ausgefüllt ist
+        if not self.smtp_from_var.get():
             messagebox.showerror("Fehler", 
-                "Bitte füllen Sie mindestens Server, Port und Absender-Adresse aus.")
+                "Bitte füllen Sie die Absender-Adresse aus.")
             return
         
-        # Prüfe Auth-spezifische Felder
+        # Bei Basic Auth prüfe auch Server und Port
         if self.auth_method_var.get() == AuthMethod.BASIC.value:
+            if not all([self.smtp_server_var.get(), self.smtp_port_var.get()]):
+                messagebox.showerror("Fehler", 
+                    "Für Standard-Authentifizierung müssen Server und Port ausgefüllt sein.")
+                return
+                
+            # Prüfe Auth-spezifische Felder
             if not self.smtp_username_var.get() or not self.smtp_password_var.get():
                 messagebox.showerror("Fehler", 
                     "Für Standard-Authentifizierung müssen Benutzername und Passwort ausgefüllt sein.")

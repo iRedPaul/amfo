@@ -1016,7 +1016,20 @@ class ExportProcessor:
                 if os.path.exists(settings_file):
                     with open(settings_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
+                        
+                        # Debug-Ausgabe
+                        logger.debug(f"Geladene smtp_auth_method aus JSON: {data.get('smtp_auth_method')}")
+                        
                         self._export_settings = ExportSettings.from_dict(data)
+                        
+                        # Sicherstellen, dass smtp_auth_method korrekt konvertiert wurde
+                        if isinstance(self._export_settings.smtp_auth_method, str):
+                            self._export_settings.smtp_auth_method = AuthMethod(self._export_settings.smtp_auth_method)
+                        
+                        # Debug-Ausgabe nach Konvertierung
+                        logger.debug(f"smtp_auth_method nach Konvertierung: {self._export_settings.smtp_auth_method}")
+                        logger.debug(f"smtp_auth_method Typ: {type(self._export_settings.smtp_auth_method)}")
+                        logger.debug(f"Vergleich mit MSGRAPH: {self._export_settings.smtp_auth_method == AuthMethod.MSGRAPH}")
                 else:
                     self._export_settings = ExportSettings()
                     # Speichere Default-Settings

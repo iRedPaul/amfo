@@ -20,7 +20,7 @@ hiddenimports = [
     'core.xml_field_processor',
     'core.function_parser',
     'core.license_manager',
-    'core.oauth2_manager',
+    'core.msgraph_manager',
     
     # GUI Module
     'gui.main_window',

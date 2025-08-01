@@ -27,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.export_config import ExportConfig, ExportFormat, ExportMethod, EmailConfig, ExportSettings, AuthMethod
 from core.function_parser import FunctionParser, VariableExtractor
 from core.ocr_processor import OCRProcessor
-from core.oauth2_manager import OAuth2Manager, get_token_storage
+from core.msgraph_manager import MSGraphManager, get_token_storage
 
 logger = logging.getLogger(__name__)
 

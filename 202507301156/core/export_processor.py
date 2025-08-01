@@ -738,8 +738,16 @@ class ExportProcessor:
             return False, "Keine E-Mail-Konfiguration vorhanden"
 
         settings = self._get_export_settings()
-        if not settings.smtp_server:
-            return False, "SMTP-Server nicht konfiguriert"
+        
+        # Prüfe ob E-Mail konfiguriert ist (entweder SMTP oder Microsoft Graph)
+        if settings.smtp_auth_method == AuthMethod.BASIC:
+            if not settings.smtp_server:
+                return False, "SMTP-Server nicht konfiguriert"
+        elif settings.smtp_auth_method == AuthMethod.MSGRAPH:
+            if not settings.msgraph_refresh_token:
+                return False, "Microsoft Graph nicht konfiguriert"
+        else:
+            return False, "Keine E-Mail-Authentifizierung konfiguriert"
 
         try:
             # Erstelle temporären Anhang
@@ -785,11 +793,8 @@ class ExportProcessor:
     def _send_email(self, email_config: EmailConfig, attachment_path: str,
                    attachment_name: str, context: Dict[str, Any],
                    settings: ExportSettings) -> Tuple[bool, str]:
-        """Sendet E-Mail"""
+        """Sendet E-Mail über SMTP oder Microsoft Graph"""
         try:
-            # Erstelle Nachricht
-            msg = MIMEMultipart('mixed')
-
             # Evaluiere E-Mail-Felder
             recipient = self.function_parser.parse_and_evaluate(
                 email_config.recipient, context
@@ -801,24 +806,131 @@ class ExportProcessor:
                 email_config.body_expression, context
             )
 
+            # CC/BCC
+            recipients = [recipient]
+            cc_list = []
+            bcc_list = []
+            
+            if email_config.cc:
+                cc = self.function_parser.parse_and_evaluate(email_config.cc, context)
+                if cc:
+                    cc_list = [addr.strip() for addr in cc.split(',')]
+                    recipients.extend(cc_list)
+            
+            if email_config.bcc:
+                bcc = self.function_parser.parse_and_evaluate(email_config.bcc, context)
+                if bcc:
+                    bcc_list = [addr.strip() for addr in bcc.split(',')]
+                    recipients.extend(bcc_list)
+
+            # Sende über die konfigurierte Methode
+            if settings.smtp_auth_method == AuthMethod.MSGRAPH:
+                # Microsoft Graph API
+                return self._send_email_msgraph(
+                    settings, recipient, cc_list, bcc_list, 
+                    subject, body, attachment_path, attachment_name
+                )
+            else:
+                # Standard SMTP
+                return self._send_email_smtp(
+                    settings, recipient, cc_list, bcc_list,
+                    subject, body, attachment_path, attachment_name, recipients
+                )
+
+        except Exception as e:
+            logger.exception("E-Mail-Versand fehlgeschlagen")
+            return False, f"E-Mail-Fehler: {str(e)}"
+
+    def _send_email_msgraph(self, settings: ExportSettings, recipient: str,
+                           cc_list: List[str], bcc_list: List[str],
+                           subject: str, body: str, 
+                           attachment_path: str, attachment_name: str) -> Tuple[bool, str]:
+        """Sendet E-Mail über Microsoft Graph API"""
+        try:
+            msgraph_manager = MSGraphManager()
+            token_storage = get_token_storage()
+            
+            # Hole gespeicherte Tokens
+            tokens = token_storage.get_tokens(settings.smtp_from_address)
+            if not tokens:
+                # Fallback auf Settings
+                tokens = {
+                    'access_token': settings.msgraph_access_token,
+                    'refresh_token': settings.msgraph_refresh_token,
+                    'token_expiry': settings.msgraph_token_expiry
+                }
+            
+            # Prüfe ob Token erneuert werden muss
+            if msgraph_manager.is_token_expired(tokens.get('token_expiry', '')):
+                # Token erneuern
+                msgraph_manager.set_client_credentials(
+                    settings.msgraph_client_id,
+                    settings.msgraph_client_secret
+                )
+                
+                success, new_tokens = msgraph_manager.refresh_access_token(
+                    tokens.get('refresh_token', '')
+                )
+                
+                if success:
+                    tokens = new_tokens
+                    # Speichere neue Tokens
+                    token_storage.set_tokens(settings.smtp_from_address, tokens)
+                else:
+                    return False, f"Token-Erneuerung fehlgeschlagen: {new_tokens.get('error', 'Unbekannter Fehler')}"
+            
+            access_token = tokens.get('access_token', '')
+            if not access_token:
+                return False, "Kein gültiger Access Token vorhanden"
+            
+            # Erstelle Anhang-Info
+            ext = Path(attachment_path).suffix
+            attachments = [{
+                'path': attachment_path,
+                'name': f"{attachment_name}{ext}"
+            }]
+            
+            # Sende E-Mail
+            success, error = msgraph_manager.send_email(
+                access_token,
+                settings.smtp_from_address,
+                [recipient],
+                subject,
+                body,
+                cc_list,
+                bcc_list,
+                attachments
+            )
+            
+            if success:
+                logger.info(f"E-Mail erfolgreich über Microsoft Graph gesendet an {recipient}")
+                return True, f"E-Mail gesendet an {recipient}"
+            else:
+                return False, error
+                
+        except Exception as e:
+            logger.exception("Microsoft Graph E-Mail-Versand fehlgeschlagen")
+            return False, f"Microsoft Graph Fehler: {str(e)}"
+
+    def _send_email_smtp(self, settings: ExportSettings, recipient: str,
+                        cc_list: List[str], bcc_list: List[str],
+                        subject: str, body: str,
+                        attachment_path: str, attachment_name: str,
+                        recipients: List[str]) -> Tuple[bool, str]:
+        """Sendet E-Mail über SMTP"""
+        try:
+            # Erstelle Nachricht
+            msg = MIMEMultipart('mixed')
+            
             # Header
             msg['From'] = settings.smtp_from_address
             msg['To'] = recipient
             msg['Subject'] = subject
             msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
-
-            # CC/BCC
-            recipients = [recipient]
-            if email_config.cc:
-                cc = self.function_parser.parse_and_evaluate(email_config.cc, context)
-                if cc:
-                    msg['Cc'] = cc
-                    recipients.extend(cc.split(','))
             
-            if email_config.bcc:
-                bcc = self.function_parser.parse_and_evaluate(email_config.bcc, context)
-                if bcc:
-                    recipients.extend(bcc.split(','))
+            # CC
+            if cc_list:
+                msg['Cc'] = ', '.join(cc_list)
 
             # Body
             msg_body = MIMEMultipart('alternative')
@@ -864,8 +976,8 @@ class ExportProcessor:
             return True, f"E-Mail gesendet an {recipient}"
 
         except Exception as e:
-            logger.exception("E-Mail-Versand fehlgeschlagen")
-            return False, f"E-Mail-Fehler: {str(e)}"
+            logger.exception("SMTP E-Mail-Versand fehlgeschlagen")
+            return False, f"SMTP-Fehler: {str(e)}"
 
     def _update_pdf_metadata(self, pdf_path: str, metadata: Dict[str, str]):
         """Aktualisiert PDF-Metadaten"""
